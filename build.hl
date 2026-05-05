@@ -1,0 +1,6 @@
+// go
+// golang
+
+> cd source-code
+> cd gaming-cli && go get gaming-cli && go build && cd ..
+> cd gamescope-manager && go get gamescope-manager && go build
