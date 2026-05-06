@@ -1,4 +1,4 @@
-package session
+package src
 
 import (
 	"fmt"
@@ -8,14 +8,15 @@ import (
 
 const stateFile = "/var/lib/hackeros-gaming/current-mode"
 
-// CurrentMode zwraca aktywny tryb: "game-mode" lub "desktop-mode"
+// CurrentMode zwraca aktywny tryb: "game-mode" lub "desktop-mode".
+// Jeśli plik stanu nie istnieje, zakłada "desktop-mode".
 func CurrentMode() (string, error) {
 	data, err := os.ReadFile(stateFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "desktop-mode", nil
 		}
-		return "", fmt.Errorf("nie można odczytać pliku stanu: %w", err)
+		return "", fmt.Errorf("nie można odczytać pliku stanu %s: %w", stateFile, err)
 	}
 	mode := strings.TrimSpace(string(data))
 	if mode == "" {
@@ -24,7 +25,7 @@ func CurrentMode() (string, error) {
 	return mode, nil
 }
 
-// SetMode zapisuje aktualny tryb do pliku stanu
+// SetMode zapisuje aktualny tryb do pliku stanu.
 func SetMode(mode string) error {
 	dir := "/var/lib/hackeros-gaming"
 	if err := os.MkdirAll(dir, 0755); err != nil {
