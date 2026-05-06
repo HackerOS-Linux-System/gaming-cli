@@ -1,4 +1,4 @@
-package mode
+package src
 
 import (
 	"fmt"
@@ -6,25 +6,27 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/HackerOS-Linux-System/gaming-cli/internal/session"
 )
 
 const (
-	// Numer TTY na którym działa Plasma
+	// TTY dla KDE Plasma (SDDM domyślnie startuje na tty1)
 	plasmaTTY = "1"
-	// Numer TTY dla trybu gry
+	// TTY dla trybu gry
 	gameTTY = "2"
-	// Serwis systemd dla Plazmy (SDDM)
+	// Serwis systemd dla display managera
 	plasmaService = "sddm.service"
-	// Serwis trybu gry
+	// Serwis trybu gry — uruchamia gamescope-manager w tle
 	gameModeService = "hackeros-game-mode.service"
 )
 
-// SwitchToGame przełącza system z KDE Plasma na tryb gry (Gamescope + Steam BPM).
-// Strategia: zatrzymuje Plasmę (SDDM), przełącza na TTY2 i uruchamia serwis gamescope-session.
+// SwitchToGame przełącza system z KDE Plasma na tryb gry.
+// Strategia:
+//  1. Zatrzymuje SDDM (co ubija Plasmę).
+//  2. Przełącza konsolę wirtualną na TTY2.
+//  3. Uruchamia serwis hackeros-game-mode (gamescope + Steam BPM).
+//     Jeśli serwis nie istnieje — uruchamia gamescope-manager bezpośrednio.
 func SwitchToGame() error {
-	current, err := session.CurrentMode()
+	current, err := CurrentMode()
 	if err != nil {
 		return err
 	}
@@ -34,40 +36,39 @@ func SwitchToGame() error {
 	}
 
 	fmt.Println("[gaming-cli] Przełączam na tryb gry...")
-	fmt.Println("[gaming-cli] Zamykam KDE Plasma (SDDM)...")
 
-	// Sprawdź czy SDDM działa
-	sddmRunning := isServiceActive(plasmaService)
-
-	if sddmRunning {
-		// Zatrzymaj SDDM — to ubije Plasmę
+	// Zatrzymaj SDDM jeśli działa
+	if isServiceActive(plasmaService) {
+		fmt.Println("[gaming-cli] Zatrzymuję KDE Plasma (SDDM)...")
 		if err := runSystemctl("stop", plasmaService); err != nil {
-			return fmt.Errorf("nie można zatrzymać SDDM: %w", err)
+			return fmt.Errorf("nie można zatrzymać %s: %w", plasmaService, err)
 		}
-		// Krótka pauza żeby display server się zakończył
+		// Daj czas display serverowi na pełne zamknięcie
 		time.Sleep(2 * time.Second)
 	}
 
 	// Przełącz na TTY2
 	fmt.Printf("[gaming-cli] Przełączam na TTY%s...\n", gameTTY)
 	if err := switchTTY(gameTTY); err != nil {
-		// Nie przerywaj — może już jesteśmy na właściwym TTY
 		fmt.Fprintf(os.Stderr, "[gaming-cli] Ostrzeżenie: przełączenie TTY: %v\n", err)
 	}
 
-	// Uruchom serwis trybu gry (gamescope-session + Steam)
+	// Uruchom serwis trybu gry
 	fmt.Println("[gaming-cli] Uruchamiam tryb gry (gamescope + Steam)...")
 	if err := runSystemctl("start", gameModeService); err != nil {
-		// Fallback: uruchom gamescope-manager bezpośrednio
-		fmt.Fprintf(os.Stderr, "[gaming-cli] Serwis %s niedostępny, próbuję uruchomić gamescope-manager...\n", gameModeService)
-		if err2 := launchGamescopeManager(); err2 != nil {
-			// Przywróć SDDM w razie błędu
+		// Fallback: gamescope-manager bezpośrednio
+		fmt.Fprintf(os.Stderr,
+			"[gaming-cli] Serwis %s niedostępny, próbuję gamescope-manager...\n",
+			gameModeService,
+		)
+		if err2 := launchGamescopeManagerDirect(); err2 != nil {
+			// Przywróć Plasmę jeśli coś poszło nie tak
 			_ = runSystemctl("start", plasmaService)
-			return fmt.Errorf("nie można uruchomić trybu gry: gamescope-manager: %w", err2)
+			return fmt.Errorf("nie można uruchomić trybu gry: %w", err2)
 		}
 	}
 
-	if err := session.SetMode("game-mode"); err != nil {
+	if err := SetMode("game-mode"); err != nil {
 		fmt.Fprintf(os.Stderr, "[gaming-cli] Ostrzeżenie: nie można zapisać stanu: %v\n", err)
 	}
 
@@ -77,7 +78,7 @@ func SwitchToGame() error {
 
 // SwitchToDesktop przełącza z trybu gry z powrotem na KDE Plasma.
 func SwitchToDesktop() error {
-	current, err := session.CurrentMode()
+	current, err := CurrentMode()
 	if err != nil {
 		return err
 	}
@@ -90,19 +91,19 @@ func SwitchToDesktop() error {
 
 	// Zatrzymaj serwis trybu gry
 	if isServiceActive(gameModeService) {
-		fmt.Println("[gaming-cli] Zamykam tryb gry...")
+		fmt.Println("[gaming-cli] Zatrzymuję tryb gry...")
 		if err := runSystemctl("stop", gameModeService); err != nil {
-			fmt.Fprintf(os.Stderr, "[gaming-cli] Ostrzeżenie: zatrzymanie trybu gry: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[gaming-cli] Ostrzeżenie: %v\n", err)
 		}
 		time.Sleep(2 * time.Second)
 	} else {
-		// Spróbuj ubić gamescope-manager jeśli działa jako proces
-		killProcess("gamescope-manager")
-		killProcess("gamescope")
+		// Fallback: ubij procesy gamescope-manager i gamescope
+		killByName("gamescope-manager")
+		killByName("gamescope")
 		time.Sleep(1 * time.Second)
 	}
 
-	// Przełącz na TTY1 (Plasma)
+	// Przełącz na TTY1
 	fmt.Printf("[gaming-cli] Przełączam na TTY%s...\n", plasmaTTY)
 	if err := switchTTY(plasmaTTY); err != nil {
 		fmt.Fprintf(os.Stderr, "[gaming-cli] Ostrzeżenie: przełączenie TTY: %v\n", err)
@@ -111,30 +112,30 @@ func SwitchToDesktop() error {
 	// Uruchom SDDM
 	fmt.Println("[gaming-cli] Uruchamiam KDE Plasma (SDDM)...")
 	if err := runSystemctl("start", plasmaService); err != nil {
-		return fmt.Errorf("nie można uruchomić SDDM: %w", err)
+		return fmt.Errorf("nie można uruchomić %s: %w", plasmaService, err)
 	}
 
-	if err := session.SetMode("desktop-mode"); err != nil {
+	if err := SetMode("desktop-mode"); err != nil {
 		fmt.Fprintf(os.Stderr, "[gaming-cli] Ostrzeżenie: nie można zapisać stanu: %v\n", err)
 	}
 
-	fmt.Println("[gaming-cli] Tryb pulpitu aktywny. KDE Plasma uruchomiona.")
+	fmt.Println("[gaming-cli] Tryb pulpitu aktywny.")
 	return nil
 }
 
-// launchGamescopeManager uruchamia gamescope-manager jako proces w tle na aktywnym TTY.
-func launchGamescopeManager() error {
-	gsm, err := exec.LookPath("gamescope-manager")
+// launchGamescopeManagerDirect uruchamia gamescope-manager jako proces w tle.
+// Używany gdy serwis systemd nie jest dostępny.
+func launchGamescopeManagerDirect() error {
+	gsmPath, err := findBinary("gamescope-manager")
 	if err != nil {
-		return fmt.Errorf("gamescope-manager nie znaleziony w PATH: %w", err)
+		return fmt.Errorf("gamescope-manager nie znaleziony: %w", err)
 	}
 
-	// Ustaw zmienne środowiskowe dla gamescope na TTY
 	env := os.Environ()
 	env = setEnv(env, "XDG_SESSION_TYPE", "wayland")
 	env = setEnv(env, "XDG_CURRENT_DESKTOP", "gamescope")
 
-	cmd := exec.Command(gsm, "start", "--steam")
+	cmd := exec.Command(gsmPath, "start", "--steam")
 	cmd.Env = env
 	cmd.Stdin = nil
 	cmd.Stdout = os.Stdout
@@ -144,24 +145,22 @@ func launchGamescopeManager() error {
 		return fmt.Errorf("nie można uruchomić gamescope-manager: %w", err)
 	}
 
-	fmt.Printf("[gaming-cli] gamescope-manager uruchomiony (PID %d)\n", cmd.Process.Pid)
-	// Zapisz PID do pliku stanu
-	pidFile := "/var/lib/hackeros-gaming/gamescope-manager.pid"
-	_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
+	fmt.Printf("[gaming-cli] gamescope-manager uruchomiony (PID: %d)\n", cmd.Process.Pid)
+
+	// Zapisz PID
+	pidPath := "/var/lib/hackeros-gaming/gamescope-manager.pid"
+	_ = os.MkdirAll("/var/lib/hackeros-gaming", 0755)
+	_ = os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
 
 	return nil
 }
 
-// switchTTY przełącza aktywny terminal wirtualny (TTY).
+// switchTTY przełącza aktywną konsolę wirtualną przez chvt.
 func switchTTY(tty string) error {
-	// chvt wymaga roota lub odpowiednich uprawnień
-	cmd := exec.Command("chvt", tty)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return exec.Command("chvt", tty).Run()
 }
 
-// runSystemctl uruchamia komendę systemctl.
+// runSystemctl uruchamia polecenie systemctl z podaną akcją i serwisem.
 func runSystemctl(action, service string) error {
 	cmd := exec.Command("systemctl", action, service)
 	cmd.Stdout = os.Stdout
@@ -171,16 +170,24 @@ func runSystemctl(action, service string) error {
 
 // isServiceActive sprawdza czy serwis systemd jest aktywny.
 func isServiceActive(service string) bool {
-	cmd := exec.Command("systemctl", "is-active", "--quiet", service)
-	return cmd.Run() == nil
+	return exec.Command("systemctl", "is-active", "--quiet", service).Run() == nil
 }
 
-// killProcess wysyła SIGTERM do procesu o podanej nazwie.
-func killProcess(name string) {
+// killByName wysyła SIGTERM do procesu o podanej nazwie.
+func killByName(name string) {
 	_ = exec.Command("pkill", "-TERM", name).Run()
 }
 
-// setEnv ustawia zmienną środowiskową w slice'u, nadpisując istniejącą.
+// findBinary szuka pliku wykonywalnego najpierw w /usr/bin, potem w PATH.
+func findBinary(name string) (string, error) {
+	fixed := "/usr/bin/" + name
+	if _, err := os.Stat(fixed); err == nil {
+		return fixed, nil
+	}
+	return exec.LookPath(name)
+}
+
+// setEnv ustawia zmienną środowiskową w slice, nadpisując istniejącą wartość.
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	for i, e := range env {
