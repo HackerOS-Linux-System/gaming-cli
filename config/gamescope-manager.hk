@@ -1,0 +1,15 @@
+! HackerOS Gamescope Manager — konfiguracja (format .hk)
+! Edytuj ręcznie lub przez: gamescope-manager config set <klucz> <wartość>
+! Dokumentacja formatu .hk:
+!   https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html
+
+[gamescope]
+-> width       => 1920
+-> height      => 1080
+-> refresh     => 60
+-> fullscreen  => true
+-> vsync       => true
+-> hdr         => false
+-> mangoapp    => true
+-> auto_steam  => true
+-> extra_flags => []
