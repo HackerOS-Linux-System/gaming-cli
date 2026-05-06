@@ -4,223 +4,244 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
-	"github.com/HackerOS-Linux-System/gaming-cli/internal/distro"
-	"github.com/HackerOS-Linux-System/gaming-cli/internal/mode"
-	"github.com/HackerOS-Linux-System/gaming-cli/internal/session"
+	"github.com/charmbracelet/lipgloss"
+	"gaming-cli/src"
 )
 
-const (
-	version = "0.0.1"
-	banner  = `
-  _   _            _              ___  ____  
- | | | | __ _  ___| | _____ _ __|/ _ \/ ___| 
- | |_| |/ _' |/ __| |/ / _ \ '__| | | \___ \ 
- |  _  | (_| | (__|   <  __/ |  | |_| |___) |
- |_| |_|\__,_|\___|_|\_\___|_|   \___/|____/ 
- Gaming CLI — HackerOS Gaming Edition v` + version + `
-`
-)
+const version = "0.0.1"
+
+func printBanner() {
+	title := lipgloss.NewStyle().Bold(true).Foreground(src.ColorPrimary).
+	Render("  HackerOS Gaming Edition")
+	sub := lipgloss.NewStyle().Foreground(src.ColorSecondary).
+	Render("  gaming-cli") +
+	lipgloss.NewStyle().Foreground(src.ColorDim).Render(" ─ ") +
+	lipgloss.NewStyle().Foreground(src.ColorAccent).Faint(true).
+	Render(fmt.Sprintf("v%s  ·  Debian Testing (Forky)  ·  PC / Laptop", version))
+	fmt.Println(title)
+	fmt.Println(sub)
+	fmt.Println()
+}
 
 func printHelp() {
-	fmt.Print(banner)
-	fmt.Println(`
-UŻYCIE:
-  gaming-cli <komenda> [argumenty]
+	printBanner()
 
-KOMENDY:
-  switch game-mode      Przełącz na tryb gry (Gamescope + Steam BPM)
-  switch desktop-mode   Przełącz z powrotem na KDE Plasma
-  status                Pokaż aktywny tryb (game/desktop)
-  info                  Informacje o środowisku gaming
-  gamescope [args...]   Uruchom gamescope z niestandardowymi argumentami
-  help                  Pokaż tę pomoc
-  version               Pokaż wersję
+	sectionStyle := lipgloss.NewStyle().Foreground(src.ColorPrimary).Bold(true)
+	cmdStyle     := lipgloss.NewStyle().Foreground(src.ColorAccent).Bold(true).Width(24)
+	descStyle    := lipgloss.NewStyle().Foreground(src.ColorGray)
+	argStyle     := lipgloss.NewStyle().Foreground(src.ColorSecondary)
+	divider      := src.Divider(60)
 
-PRZYKŁADY:
-  gaming-cli switch game-mode
-  gaming-cli switch desktop-mode
-  gaming-cli status
-  gaming-cli gamescope --width 1920 --height 1080
+	fmt.Println(sectionStyle.Render("  UŻYCIE"))
+	fmt.Println("  " + argStyle.Render("gaming-cli") + " " + descStyle.Render("[komenda] [argumenty]"))
+	fmt.Println()
 
-UWAGA:
-  Narzędzie przeznaczone wyłącznie dla HackerOS Gaming Edition (Debian Testing).
-  Nie obsługuje handheldów — tylko PC i laptopy.
-`)
+	fmt.Println(sectionStyle.Render("  TRYB INTERAKTYWNY"))
+	fmt.Println("  " + cmdStyle.Render("gaming-cli") + descStyle.Render("Otwórz TUI (bez argumentów)"))
+	fmt.Println("  " + cmdStyle.Render("gaming-cli tui") + descStyle.Render("Otwórz TUI jawnie"))
+	fmt.Println()
+
+	fmt.Println(sectionStyle.Render("  KOMENDY"))
+	cmds := [][]string{
+		{"switch game-mode",    "Przełącz na tryb gry (Gamescope + Steam BPM)"},
+		{"switch desktop-mode", "Przełącz z powrotem na KDE Plasma"},
+		{"status",              "Pokaż aktywny tryb"},
+		{"info",                "Informacje o środowisku gaming"},
+		{"gamescope [args]",    "Uruchom gamescope z podanymi argumentami"},
+		{"version",             "Pokaż wersję"},
+		{"help",                "Pokaż tę pomoc"},
+	}
+	for _, c := range cmds {
+		fmt.Println("  " + cmdStyle.Render(c[0]) + descStyle.Render(c[1]))
+	}
+	fmt.Println()
+
+	fmt.Println("  " + divider)
+	fmt.Println("  " + descStyle.Render("Przeznaczony wyłącznie dla HackerOS Gaming Edition (Debian Testing/Forky)."))
+	fmt.Println("  " + descStyle.Render("Obsługuje tylko PC i laptopy — handheldowe urządzenia nie są wspierane."))
+	fmt.Println()
+}
+
+func printStatus() {
+	mode, err := src.CurrentMode()
+	if err != nil {
+		printErr(err)
+		os.Exit(1)
+	}
+	printBanner()
+	label := lipgloss.NewStyle().Foreground(src.ColorGray).Render("  Aktywny tryb : ")
+	badge := src.ModeBadge(mode)
+	fmt.Println(label + badge)
+	fmt.Println()
+}
+
+func printInfoCmd() {
+	printBanner()
+	info := src.GatherInfo()
+
+	title := lipgloss.NewStyle().Foreground(src.ColorAccent).Bold(true).
+	Render("  📊 Środowisko gaming")
+	fmt.Println(title)
+	fmt.Println("  " + src.Divider(56))
+
+	rows := []struct{ label, value string }{
+		{"Dystrybucja", info.PrettyName},
+		{"Debian",      info.DebianVer},
+		{"Jądro",       info.Kernel},
+		{"GPU",         info.GPU},
+		{"Gamescope",   info.Gamescope},
+		{"Steam",       info.Steam},
+		{"Tryb",        info.CurrentMode},
+	}
+
+	lStyle := lipgloss.NewStyle().Foreground(src.ColorGray).Width(14)
+	sep    := lipgloss.NewStyle().Foreground(src.ColorDim).Render(" : ")
+
+	for _, r := range rows {
+		var val string
+		switch {
+			case strings.Contains(r.value, "NIE ZAINSTALOWANY"):
+				val = src.StyleValueBad.Render(r.value)
+			case strings.Contains(r.value, "game-mode"):
+				val = src.StyleValueGood.Render("🎮 " + r.value)
+			case strings.Contains(r.value, "desktop-mode"):
+				val = src.StyleValue.Render("🖥  " + r.value)
+			case strings.Contains(r.value, "zainstalowany"):
+				val = src.StyleValueGood.Render(r.value)
+			default:
+				val = src.StyleValue.Render(r.value)
+		}
+		fmt.Println("  " + lStyle.Render(r.label) + sep + val)
+	}
+	fmt.Println()
+}
+
+func printOK(msg string) {
+	icon := lipgloss.NewStyle().Foreground(src.ColorGreen).Bold(true).Render("✔")
+	text := lipgloss.NewStyle().Foreground(src.ColorWhite).Bold(true).Render(msg)
+	fmt.Printf("  %s  %s\n", icon, text)
+}
+
+func printErr(err error) {
+	icon := lipgloss.NewStyle().Foreground(src.ColorRed).Bold(true).Render("✖")
+	text := lipgloss.NewStyle().Foreground(src.ColorRed).Render(err.Error())
+	fmt.Fprintf(os.Stderr, "  %s  %s\n", icon, text)
+}
+
+func printWarn(msg string) {
+	icon := lipgloss.NewStyle().Foreground(src.ColorYellow).Bold(true).Render("⚠")
+	text := lipgloss.NewStyle().Foreground(src.ColorYellow).Render(msg)
+	fmt.Printf("  %s  %s\n", icon, text)
 }
 
 func main() {
+	// Bez argumentów → TUI
 	if len(os.Args) < 2 {
-		printHelp()
-		os.Exit(0)
-	}
-
-	// Sprawdź dystrybucję — tylko HackerOS Gaming Edition na Debianie Testing
-	if err := distro.Check(); err != nil {
-		fmt.Fprintf(os.Stderr, "[gaming-cli] BŁĄD: %v\n", err)
-		os.Exit(1)
+		if err := src.CheckDistro(); err != nil {
+			printErr(err)
+			os.Exit(1)
+		}
+		src.RunTUI()
+		return
 	}
 
 	cmd := strings.ToLower(os.Args[1])
 
-	switch cmd {
-	case "switch":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "[gaming-cli] Błąd: podaj tryb: game-mode lub desktop-mode")
-			os.Exit(1)
-		}
-		target := strings.ToLower(os.Args[2])
-		switch target {
-		case "game-mode":
-			if err := mode.SwitchToGame(); err != nil {
-				fmt.Fprintf(os.Stderr, "[gaming-cli] Błąd przy przełączaniu do trybu gry: %v\n", err)
+	// help i version nie wymagają weryfikacji dystrybucji
+	if cmd != "help" && cmd != "--help" && cmd != "-h" &&
+		cmd != "version" && cmd != "--version" {
+			if err := src.CheckDistro(); err != nil {
+				printErr(err)
 				os.Exit(1)
 			}
-		case "desktop-mode":
-			if err := mode.SwitchToDesktop(); err != nil {
-				fmt.Fprintf(os.Stderr, "[gaming-cli] Błąd przy przełączaniu do trybu pulpitu: %v\n", err)
-				os.Exit(1)
-			}
-		default:
-			fmt.Fprintf(os.Stderr, "[gaming-cli] Nieznany tryb: %q. Użyj: game-mode lub desktop-mode\n", target)
-			os.Exit(1)
 		}
 
-	case "status":
-		s, err := session.CurrentMode()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[gaming-cli] Błąd odczytu stanu: %v\n", err)
+		switch cmd {
+			case "tui":
+				src.RunTUI()
+
+			case "switch":
+				if len(os.Args) < 3 {
+					printBanner()
+					printErr(fmt.Errorf("podaj tryb: game-mode lub desktop-mode"))
+					os.Exit(1)
+				}
+				target := strings.ToLower(os.Args[2])
+				printBanner()
+				switch target {
+					case "game-mode":
+						printWarn("Przełączam na tryb gry…")
+						if err := src.SwitchToGame(); err != nil {
+							printErr(err)
+							os.Exit(1)
+						}
+						printOK("Tryb gry aktywny! Miłej gry! 🎮")
+
+					case "desktop-mode":
+						printWarn("Przełączam na tryb pulpitu…")
+						if err := src.SwitchToDesktop(); err != nil {
+							printErr(err)
+							os.Exit(1)
+						}
+						printOK("KDE Plasma uruchomiona! 🖥")
+
+					default:
+						printErr(fmt.Errorf("nieznany tryb: %q — użyj game-mode lub desktop-mode", target))
+						os.Exit(1)
+				}
+
+					case "status":
+						printStatus()
+
+					case "info":
+						printInfoCmd()
+
+					case "gamescope":
+						if err := src.CheckDistro(); err != nil {
+							printErr(err)
+							os.Exit(1)
+						}
+						runGamescope(os.Args[2:])
+
+					case "version", "--version":
+						printBanner()
+						fmt.Printf("  gaming-cli %s\n", version)
+						fmt.Printf("  HackerOS Gaming Edition · Debian Testing (Forky)\n\n")
+
+					case "help", "--help", "-h":
+						printHelp()
+
+					default:
+						printBanner()
+						printErr(fmt.Errorf("nieznana komenda: %q", cmd))
+						fmt.Println("  Użyj " +
+						lipgloss.NewStyle().Foreground(src.ColorAccent).Render("gaming-cli help") +
+						" aby uzyskać pomoc.")
+						os.Exit(1)
+		}
+}
+
+func runGamescope(args []string) {
+	gsPath := "/usr/bin/gamescope"
+	if _, err := os.Stat(gsPath); err != nil {
+		p, err2 := exec.LookPath("gamescope")
+		if err2 != nil {
+			printErr(fmt.Errorf("gamescope nie jest zainstalowany\nZainstaluj: sudo apt install gamescope"))
 			os.Exit(1)
 		}
-		fmt.Printf("[gaming-cli] Aktywny tryb: %s\n", s)
-
-	case "info":
-		printInfo()
-
-	case "gamescope":
-		extraArgs := os.Args[2:]
-		gsPath, err := exec.LookPath("gamescope")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "[gaming-cli] Błąd: gamescope nie jest zainstalowany.")
-			os.Exit(1)
+		gsPath = p
+	}
+	printBanner()
+	printWarn("Uruchamiam gamescope…")
+	c := exec.Command(gsPath, args...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := c.Run(); err != nil {
+		if e, ok := err.(*exec.ExitError); ok {
+			os.Exit(e.ExitCode())
 		}
-		gsCmd := exec.Command(gsPath, extraArgs...)
-		gsCmd.Stdin = os.Stdin
-		gsCmd.Stdout = os.Stdout
-		gsCmd.Stderr = os.Stderr
-		if err := gsCmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "[gaming-cli] gamescope zakończył się błędem: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "version":
-		fmt.Printf("gaming-cli %s\nHackerOS Gaming Edition — Debian Testing (Forky)\n", version)
-
-	case "help", "--help", "-h":
-		printHelp()
-
-	default:
-		fmt.Fprintf(os.Stderr, "[gaming-cli] Nieznana komenda: %q\nUżyj 'gaming-cli help' aby uzyskać pomoc.\n", cmd)
+		printErr(err)
 		os.Exit(1)
 	}
-}
-
-func printInfo() {
-	fmt.Print(banner)
-
-	// Kernel
-	kernel := runCmd("uname", "-r")
-	// Distro
-	distroName := readOSRelease("PRETTY_NAME")
-	// Gamescope
-	gsVersion := ""
-	if p, err := exec.LookPath("gamescope"); err == nil {
-		out, _ := exec.Command(p, "--version").Output()
-		gsVersion = strings.TrimSpace(string(out))
-		if gsVersion == "" {
-			gsVersion = "zainstalowany (" + p + ")"
-		}
-	} else {
-		gsVersion = "NIE ZAINSTALOWANY"
-	}
-	// Steam
-	steamStatus := "NIE ZAINSTALOWANY"
-	if _, err := exec.LookPath("steam"); err == nil {
-		steamStatus = "zainstalowany"
-	} else if _, err := exec.LookPath("steam-runtime"); err == nil {
-		steamStatus = "zainstalowany (runtime)"
-	}
-	// Tryb
-	currentMode, _ := session.CurrentMode()
-
-	fmt.Printf("  Dystrybucja : %s\n", distroName)
-	fmt.Printf("  Jądro       : %s\n", kernel)
-	fmt.Printf("  Gamescope   : %s\n", gsVersion)
-	fmt.Printf("  Steam       : %s\n", steamStatus)
-	fmt.Printf("  Tryb        : %s\n", currentMode)
-
-	// GPU
-	gpuInfo := detectGPU()
-	fmt.Printf("  GPU         : %s\n", gpuInfo)
-	fmt.Println()
-}
-
-func runCmd(name string, args ...string) string {
-	out, err := exec.Command(name, args...).Output()
-	if err != nil {
-		return "nieznane"
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func readOSRelease(key string) string {
-	data, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return "nieznane"
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, key+"=") {
-			val := strings.TrimPrefix(line, key+"=")
-			val = strings.Trim(val, `"`)
-			return val
-		}
-	}
-	return "nieznane"
-}
-
-func detectGPU() string {
-	// Sprawdź przez lspci
-	out, err := exec.Command("lspci").Output()
-	if err != nil {
-		return "nieznane (lspci niedostępne)"
-	}
-	var gpus []string
-	for _, line := range strings.Split(string(out), "\n") {
-		lo := strings.ToLower(line)
-		if strings.Contains(lo, "vga") || strings.Contains(lo, "3d") || strings.Contains(lo, "display") {
-			// Wyciągnij nazwę po ostatnim ':'
-			parts := strings.SplitN(line, ": ", 2)
-			if len(parts) == 2 {
-				gpus = append(gpus, strings.TrimSpace(parts[1]))
-			}
-		}
-	}
-	if len(gpus) == 0 {
-		return "nieznane"
-	}
-	return strings.Join(gpus, " | ")
-}
-
-// Pomocnicza funkcja do sprawdzania czy plik istnieje
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-// Pomocnicza do tworzenia katalogu stanu
-func ensureStateDir() error {
-	dir := filepath.Join("/var/lib", "hackeros-gaming")
-	return os.MkdirAll(dir, 0755)
 }
