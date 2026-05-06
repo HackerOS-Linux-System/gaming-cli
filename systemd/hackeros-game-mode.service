@@ -1,0 +1,27 @@
+[Unit]
+Description=HackerOS Game Mode (Gamescope + Steam Big Picture)
+After=systemd-user-sessions.service
+Conflicts=sddm.service graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gamescope-manager start --steam
+ExecStop=/usr/bin/gamescope-manager stop
+Restart=on-failure
+RestartSec=3s
+
+# Uruchom jako lokalny użytkownik (nie root)
+# W praktyce gaming-cli powinien być wywoływany przez użytkownika
+# a serwis uruchamiany przez sudo lub polkit
+User=root
+StandardInput=tty
+TTYPath=/dev/tty2
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=no
+
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_CURRENT_DESKTOP=gamescope
+
+[Install]
+WantedBy=multi-user.target
