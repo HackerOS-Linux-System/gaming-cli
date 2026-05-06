@@ -7,47 +7,74 @@ import (
 	"strings"
 )
 
-// PrintInfo wyświetla informacje o środowisku gaming.
-func PrintInfo() {
-	kernel := runCmd("uname", "-r")
-	prettyName := readOSReleaseField("PRETTY_NAME")
-	versionID := readOSReleaseField("VERSION_ID")
-
-	gsVersion := gamescopeVersion()
-	steamStatus := steamInfo()
-	currentMode, _ := CurrentMode()
-	gpu := detectGPU()
-	debianVer := debianVersion()
-
-	fmt.Println()
-	fmt.Println("  Środowisko HackerOS Gaming Edition")
-	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Printf("  Dystrybucja  : %s %s\n", prettyName, versionID)
-	fmt.Printf("  Debian       : %s\n", debianVer)
-	fmt.Printf("  Jądro        : %s\n", kernel)
-	fmt.Printf("  GPU          : %s\n", gpu)
-	fmt.Printf("  Gamescope    : %s\n", gsVersion)
-	fmt.Printf("  Steam        : %s\n", steamStatus)
-	fmt.Printf("  Tryb         : %s\n", currentMode)
-	fmt.Println("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-	fmt.Println()
+type EnvInfo struct {
+	PrettyName  string
+	DebianVer   string
+	Kernel      string
+	GPU         string
+	Gamescope   string
+	Steam       string
+	CurrentMode string
 }
 
-func gamescopeVersion() string {
-	p, err := exec.LookPath("gamescope")
-	if err != nil {
-		return "NIE ZAINSTALOWANY"
+func GatherInfo() EnvInfo {
+	mode, _ := CurrentMode()
+	return EnvInfo{
+		PrettyName:  readOSField("PRETTY_NAME"),
+		DebianVer:   readFile("/etc/debian_version"),
+		Kernel:      runCmd("uname", "-r"),
+		GPU:         detectGPU(),
+		Gamescope:   gamescopeVer(),
+		Steam:       steamStatus(),
+		CurrentMode: mode,
 	}
-	out, err := exec.Command(p, "--version").Output()
-	if err != nil || strings.TrimSpace(string(out)) == "" {
-		return fmt.Sprintf("zainstalowany (%s)", p)
+}
+
+func readOSField(key string) string {
+	f, _ := parseKeyValueFile(osReleasePath)
+	v := f[key]
+	if v == "" {
+		return "nieznane"
+	}
+	return v
+}
+
+func readFile(path string) string {
+	d, err := os.ReadFile(path)
+	if err != nil {
+		return "nieznane"
+	}
+	return strings.TrimSpace(string(d))
+}
+
+func runCmd(name string, args ...string) string {
+	out, err := exec.Command(name, args...).Output()
+	if err != nil {
+		return "nieznane"
 	}
 	return strings.TrimSpace(string(out))
 }
 
-func steamInfo() string {
-	for _, name := range []string{"steam", "steam-runtime", "steam-native"} {
-		if p, err := exec.LookPath(name); err == nil {
+func gamescopeVer() string {
+	p, err := exec.LookPath("gamescope")
+	if err != nil {
+		if _, se := os.Stat("/usr/bin/gamescope"); se == nil {
+			p = "/usr/bin/gamescope"
+		} else {
+			return "NIE ZAINSTALOWANY"
+		}
+	}
+	out, _ := exec.Command(p, "--version").Output()
+	v := strings.TrimSpace(string(out))
+	if v == "" {
+		return fmt.Sprintf("zainstalowany (%s)", p)
+	}
+	return v
+}
+
+func steamStatus() string {
+	for _, n := range []string{"steam", "steam-runtime", "steam-native"} {
+		if p, err := exec.LookPath(n); err == nil {
 			return fmt.Sprintf("zainstalowany (%s)", p)
 		}
 	}
@@ -73,32 +100,4 @@ func detectGPU() string {
 		return "nieznane"
 	}
 	return strings.Join(gpus, " | ")
-}
-
-func debianVersion() string {
-	data, err := os.ReadFile("/etc/debian_version")
-	if err != nil {
-		return "nieznane"
-	}
-	return strings.TrimSpace(string(data))
-}
-
-func readOSReleaseField(key string) string {
-	fields, err := parseKeyValueFile(osReleasePath)
-	if err != nil {
-		return "nieznane"
-	}
-	v, ok := fields[key]
-	if !ok {
-		return "nieznane"
-	}
-	return v
-}
-
-func runCmd(name string, args ...string) string {
-	out, err := exec.Command(name, args...).Output()
-	if err != nil {
-		return "nieznane"
-	}
-	return strings.TrimSpace(string(out))
 }
