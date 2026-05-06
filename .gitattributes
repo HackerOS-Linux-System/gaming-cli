@@ -1,0 +1,11 @@
+*.desktop linguist-detectable=true
+*.desktop linguist-documentation=false
+*.desktop linguist-language=INI
+
+*.service linguist-detectable=true
+*.service linguist-documentation=false
+*.service linguist-language=INI
+
+*.hk linguist-detectable=true
+*.hk linguist-documentation=false
+*.hk linguist-language=HK
