@@ -1,4 +1,4 @@
-package distro
+package src
 
 import (
 	"fmt"
@@ -6,63 +6,102 @@ import (
 	"strings"
 )
 
-// Check weryfikuje czy system to HackerOS Gaming Edition na Debianie Testing (Forky).
-// Narzędzie NIE jest przeznaczone dla handheldów — tylko PC i laptopy.
-func Check() error {
-	// Odczytaj /etc/os-release
-	data, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return fmt.Errorf("nie można odczytać /etc/os-release: %w", err)
+const (
+	osReleasePath   = "/etc/os-release"
+	kcmAboutRcPath  = "/etc/xdg/kcm-about-distrorc"
+	requiredName    = "HackerOS"
+	requiredVariant = "Gaming Edition"
+)
+
+// CheckDistro weryfikuje czy system to HackerOS Gaming Edition.
+// Sprawdza dwa pliki:
+//   - /etc/os-release        → NAME=HackerOS
+//   - /etc/xdg/kcm-about-distrorc → Variant=Gaming Edition
+//
+// Jeśli którykolwiek warunek nie jest spełniony — zwraca błąd i narzędzie
+// nie może być używane.
+func CheckDistro() error {
+	if err := checkOSRelease(); err != nil {
+		return err
 	}
+	if err := checkKCMAboutDistro(); err != nil {
+		return err
+	}
+	return nil
+}
 
-	fields := parseOSRelease(string(data))
-
-	// Sprawdź czy to HackerOS
-	id := strings.ToLower(fields["ID"])
-	idLike := strings.ToLower(fields["ID_LIKE"])
-	prettyName := strings.ToLower(fields["PRETTY_NAME"])
-
-	isHackerOS := strings.Contains(id, "hackeros") ||
-		strings.Contains(idLike, "hackeros") ||
-		strings.Contains(prettyName, "hackeros")
-
-	if !isHackerOS {
+// checkOSRelease weryfikuje NAME= w /etc/os-release.
+func checkOSRelease() error {
+	fields, err := parseKeyValueFile(osReleasePath)
+	if err != nil {
 		return fmt.Errorf(
-			"niezgodna dystrybucja: %q\n"+
-				"gaming-cli działa wyłącznie na HackerOS Gaming Edition (Debian Testing).\n"+
-				"Handheldowe urządzenia nie są obsługiwane.",
-			fields["PRETTY_NAME"],
+			"nie można odczytać %s: %v\n"+
+				"To narzędzie działa wyłącznie na HackerOS Gaming Edition.",
+			osReleasePath, err,
 		)
 	}
 
-	// Sprawdź czy to edycja Gaming (plik znacznikowy tworzony przez instalator)
-	if _, err := os.Stat("/etc/hackeros-gaming-edition"); os.IsNotExist(err) {
-		// Miękkie ostrzeżenie — nie blokuj, bo podczas development może nie istnieć
-		fmt.Fprintln(os.Stderr, "[gaming-cli] OSTRZEŻENIE: Brak /etc/hackeros-gaming-edition — upewnij się że używasz Gaming Edition.")
+	name, ok := fields["NAME"]
+	if !ok {
+		return fmt.Errorf(
+			"brak pola NAME w %s.\n"+
+				"To narzędzie działa wyłącznie na HackerOS Gaming Edition.",
+			osReleasePath,
+		)
 	}
 
-	// Sprawdź czy to Debian Testing (Forky) — przez /etc/debian_version
-	debVer, _ := readFile("/etc/debian_version")
-	debVer = strings.TrimSpace(debVer)
-	// Debian Testing ma "trixie/sid" lub "forky/sid" lub po prostu "testing"
-	isDebianTesting := strings.Contains(strings.ToLower(debVer), "forky") ||
-		strings.Contains(strings.ToLower(debVer), "testing") ||
-		strings.Contains(strings.ToLower(debVer), "sid") ||
-		strings.Contains(strings.ToLower(debVer), "trixie")
-
-	if !isDebianTesting {
-		fmt.Fprintf(os.Stderr,
-			"[gaming-cli] OSTRZEŻENIE: Wykryto Debian %q — gaming-cli jest przeznaczony dla Debian Testing (Forky).\n",
-			debVer,
+	if name != requiredName {
+		return fmt.Errorf(
+			"niezgodna dystrybucja: NAME=%q (oczekiwano %q).\n"+
+				"gaming-cli działa wyłącznie na HackerOS Gaming Edition.",
+			name, requiredName,
 		)
 	}
 
 	return nil
 }
 
-func parseOSRelease(content string) map[string]string {
+// checkKCMAboutDistro weryfikuje Variant= w /etc/xdg/kcm-about-distrorc.
+func checkKCMAboutDistro() error {
+	fields, err := parseINIFile(kcmAboutRcPath)
+	if err != nil {
+		return fmt.Errorf(
+			"nie można odczytać %s: %v\n"+
+				"To narzędzie działa wyłącznie na HackerOS Gaming Edition.\n"+
+				"Upewnij się że masz zainstalowaną edycję Gaming.",
+			kcmAboutRcPath, err,
+		)
+	}
+
+	variant, ok := fields["Variant"]
+	if !ok {
+		return fmt.Errorf(
+			"brak pola Variant= w %s.\n"+
+				"To narzędzie działa wyłącznie na HackerOS Gaming Edition.",
+			kcmAboutRcPath,
+		)
+	}
+
+	if variant != requiredVariant {
+		return fmt.Errorf(
+			"niezgodna edycja: Variant=%q (oczekiwano %q).\n"+
+				"gaming-cli działa wyłącznie na HackerOS Gaming Edition.",
+			variant, requiredVariant,
+		)
+	}
+
+	return nil
+}
+
+// parseKeyValueFile parsuje plik w formacie KEY=VALUE (lub KEY="VALUE").
+// Używany dla /etc/os-release.
+func parseKeyValueFile(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	m := make(map[string]string)
-	for _, line := range strings.Split(content, "\n") {
+	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -72,16 +111,40 @@ func parseOSRelease(content string) map[string]string {
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
-		val := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
+		val := strings.TrimSpace(parts[1])
+		// Usuń cudzysłowy jeśli są
+		val = strings.Trim(val, `"'`)
 		m[key] = val
 	}
-	return m
+	return m, nil
 }
 
-func readFile(path string) (string, error) {
-	b, err := os.ReadFile(path)
+// parseINIFile parsuje prosty plik INI/rc (ignoruje sekcje [Section]).
+// Zwraca wszystkie klucze z całego pliku (bez rozróżnienia sekcji).
+// Używany dla /etc/xdg/kcm-about-distrorc.
+func parseINIFile(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(b), nil
+	m := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		// Pomiń nagłówki sekcji [Section]
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		val = strings.Trim(val, `"'`)
+		m[key] = val
+	}
+	return m, nil
 }
