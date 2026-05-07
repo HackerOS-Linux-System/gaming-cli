@@ -1,7 +1,6 @@
 package src
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,7 +13,6 @@ const (
 	LogFile = "/var/log/hackeros-gaming/gamescope-manager.log"
 )
 
-// IsRunning sprawdza czy sesja gamescope jest aktywna (PID istnieje i proces żyje).
 func IsRunning() bool {
 	data, err := os.ReadFile(PIDFile)
 	if err != nil {
@@ -24,16 +22,13 @@ func IsRunning() bool {
 	if err != nil {
 		return false
 	}
-	// Sprawdź czy proces żyje (kill -0)
 	if err := syscall.Kill(pid, 0); err != nil {
-		// Proces nie istnieje — posprzątaj osierocony PID
 		_ = os.Remove(PIDFile)
 		return false
 	}
 	return true
 }
 
-// ReadPID zwraca PID aktywnej sesji jako string (lub pusty string).
 func ReadPID() string {
 	data, err := os.ReadFile(PIDFile)
 	if err != nil {
@@ -42,20 +37,15 @@ func ReadPID() string {
 	return strings.TrimSpace(string(data))
 }
 
-// WritePID zapisuje PID sesji do pliku.
 func WritePID(pid int) error {
 	if err := os.MkdirAll(filepath.Dir(PIDFile), 0755); err != nil {
-		return fmt.Errorf("nie można utworzyć katalogu dla PID: %w", err)
+		return err
 	}
 	return os.WriteFile(PIDFile, []byte(strconv.Itoa(pid)+"\n"), 0644)
 }
 
-// RemovePID usuwa plik PID.
-func RemovePID() {
-	_ = os.Remove(PIDFile)
-}
+func RemovePID() { _ = os.Remove(PIDFile) }
 
-// GetPIDInt zwraca PID aktywnej sesji jako int lub -1 jeśli brak.
 func GetPIDInt() int {
 	s := ReadPID()
 	if s == "" {
