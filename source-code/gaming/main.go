@@ -36,8 +36,8 @@ var shortcuts = map[string][]string{
 func banner() string {
 	t := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Render("HackerOS Gaming Edition")
 	s := lipgloss.NewStyle().Foreground(colorSecondary).Render("gaming") +
-	lipgloss.NewStyle().Foreground(colorDim).Render(" ─ ") +
-	lipgloss.NewStyle().Foreground(colorAccent).Faint(true).Render("v"+version+" · wrapper dla gaming-cli")
+		lipgloss.NewStyle().Foreground(colorDim).Render(" ─ ") +
+		lipgloss.NewStyle().Foreground(colorAccent).Faint(true).Render("v"+version+" · wrapper dla gaming-cli")
 	return t + "\n" + s + "\n"
 }
 
@@ -106,12 +106,12 @@ func main() {
 	arg := strings.ToLower(os.Args[1])
 
 	switch arg {
-		case "help", "--help", "-h":
-			printHelp()
-			return
-		case "version", "--version", "-v":
-			fmt.Println(banner())
-			return
+	case "help", "--help", "-h":
+		printHelp()
+		return
+	case "version", "--version", "-v":
+		fmt.Println(banner())
+		return
 	}
 
 	cliPath, err := findCLI()
@@ -131,10 +131,10 @@ func main() {
 	if len(finalArgs) >= 2 && finalArgs[0] == "switch" {
 		fmt.Println(banner())
 		switch finalArgs[1] {
-			case "game-mode":
-				warn("Przełączam na tryb gry…")
-			case "desktop-mode":
-				warn("Przełączam na tryb pulpitu…")
+		case "game-mode":
+			warn("Przełączam na tryb gry…")
+		case "desktop-mode":
+			warn("Przełączam na tryb pulpitu…")
 		}
 	}
 
@@ -169,7 +169,7 @@ func findCLI() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf(
 			"nie znaleziono 'gaming-cli' w /usr/bin ani w PATH\n" +
-			"Upewnij się że HackerOS Gaming Edition jest poprawnie zainstalowane",
+				"Upewnij się że HackerOS Gaming Edition jest poprawnie zainstalowane",
 		)
 	}
 	return p, nil
