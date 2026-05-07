@@ -84,7 +84,7 @@ func launchGamescopeManagerDirect() error {
 	}
 	_ = os.MkdirAll("/var/lib/hackeros-gaming", 0755)
 	_ = os.WriteFile("/var/lib/hackeros-gaming/gamescope-manager.pid",
-			 []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
+		[]byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0644)
 	return nil
 }
 
