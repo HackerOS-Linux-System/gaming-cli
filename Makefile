@@ -11,18 +11,29 @@ LOGDIR      := /var/log/hackeros-gaming
 SRCDIR      := source-code
 OUTDIR      := bin
 
-.PHONY: all build install uninstall clean
+.PHONY: all build deps install uninstall clean
 
 all: build
 
+# ── Zależności ────────────────────────────────────────────────────────────────
+# go mod tidy pobiera zależności i generuje go.sum — wymagane przed pierwszym buildem.
+
+deps:
+	@echo ">>> Pobieranie zależności i generowanie go.sum..."
+	cd $(SRCDIR)/gaming-cli        && go mod tidy && go mod download
+	cd $(SRCDIR)/gaming            && go mod tidy && go mod download
+	cd $(SRCDIR)/gamescope-manager && go mod tidy && go mod download
+	@echo "    Zależności gotowe."
+	@echo ""
+
 # ── Budowanie ────────────────────────────────────────────────────────────────
 
-build:
+build: deps
 	@echo ">>> [1/3] Budowanie gaming-cli..."
 	@mkdir -p $(OUTDIR)
-	cd $(SRCDIR)/gaming-cli && go build -ldflags="-s -w" -o ../../$(OUTDIR)/gaming-cli .
+	cd $(SRCDIR)/gaming-cli        && go build -ldflags="-s -w" -o ../../$(OUTDIR)/gaming-cli .
 	@echo ">>> [2/3] Budowanie gaming (wrapper)..."
-	cd $(SRCDIR)/gaming && go build -ldflags="-s -w" -o ../../$(OUTDIR)/gaming .
+	cd $(SRCDIR)/gaming            && go build -ldflags="-s -w" -o ../../$(OUTDIR)/gaming .
 	@echo ">>> [3/3] Budowanie gamescope-manager..."
 	cd $(SRCDIR)/gamescope-manager && go build -ldflags="-s -w" -o ../../$(OUTDIR)/gamescope-manager .
 	@echo ""
@@ -56,7 +67,6 @@ install: build
 
 	@echo "  [config] Instalacja konfiguracji .hk..."
 	install -dm755 $(DESTDIR)$(ETCDIR)
-	# Nie nadpisuj jeśli użytkownik już edytował
 	if [ ! -f $(DESTDIR)$(ETCDIR)/gamescope-manager.hk ]; then \
 		install -Dm644 dist/gamescope-manager.hk \
 			$(DESTDIR)$(ETCDIR)/gamescope-manager.hk; \
@@ -76,7 +86,7 @@ install: build
 	install -dm755 $(DESTDIR)$(LOGDIR)
 
 	@echo ""
-	@echo "    ✔  Instalacja zakończona!"
+	@echo "    Instalacja zakończona!"
 	@echo ""
 	@echo "    Następne kroki:"
 	@echo "      sudo systemctl daemon-reload"
@@ -100,19 +110,10 @@ uninstall:
 	rm -f $(DESTDIR)$(SKELDESKTOP)/hackeros-game-mode.desktop
 	rm -f $(DESTDIR)/etc/hackeros-gaming-edition
 	@echo ">>> Odinstalowano."
-	@echo "    Uwaga: pliki konfiguracyjne w /etc/hackeros/ pozostają."
+	@echo "    Uwaga: /etc/hackeros/ i /var/lib/hackeros-gaming/ pozostają."
 
 # ── Czyszczenie ───────────────────────────────────────────────────────────────
 
 clean:
 	rm -rf $(OUTDIR)/
 	@echo ">>> Wyczyszczono."
-
-# ── Deps (go mod tidy) ────────────────────────────────────────────────────────
-
-deps:
-	@echo ">>> Pobieranie zależności..."
-	cd $(SRCDIR)/gaming-cli && go mod tidy
-	cd $(SRCDIR)/gaming && go mod tidy
-	cd $(SRCDIR)/gamescope-manager && go mod tidy
-	@echo ">>> Gotowe."
