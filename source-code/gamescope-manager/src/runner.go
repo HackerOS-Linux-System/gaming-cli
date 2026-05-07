@@ -12,60 +12,39 @@ import (
 	"time"
 )
 
-// Start uruchamia sesję gamescope zgodnie z podaną konfiguracją.
+// Start uruchamia sesję gamescope + opcjonalnie Steam BPM.
 func Start(cfg Config) error {
-	// Sprawdź czy gamescope jest zainstalowany
 	gsPath, err := findBinary("gamescope")
 	if err != nil {
-		return fmt.Errorf(
-			"gamescope nie jest zainstalowany lub niedostępny w PATH\n"+
-				"Zainstaluj: sudo apt install gamescope",
-		)
+		return fmt.Errorf("gamescope nie jest zainstalowany\nZainstaluj: sudo apt install gamescope")
 	}
-
-	// Sprawdź czy sesja już działa
 	if IsRunning() {
-		return fmt.Errorf(
-			"sesja gamescope już działa (PID: %s)\n"+
-				"Użyj 'gamescope-manager restart' aby zrestartować",
-			ReadPID(),
-		)
+		return fmt.Errorf("sesja gamescope już działa (PID: %s)\nUżyj 'restart' aby zrestartować", ReadPID())
 	}
 
-	// Zbuduj argumenty
 	args := buildArgs(cfg)
 
-	// Znajdź Steam jeśli potrzebny
 	var steamPath string
 	if cfg.AutoSteam {
 		steamPath, err = findSteam()
 		if err != nil {
-			fmt.Fprintf(os.Stderr,
-				"[gamescope-manager] Ostrzeżenie: Steam nie znaleziony (%v)\n"+
-					"[gamescope-manager] Uruchamiam gamescope bez Steam.\n",
-				err,
-			)
+			fmt.Fprintf(os.Stderr, "[gamescope-manager] Ostrzeżenie: Steam nie znaleziony: %v\n", err)
 			cfg.AutoSteam = false
 		}
 	}
 
-	// Dołącz Steam do argumentów
 	if cfg.AutoSteam && steamPath != "" {
 		args = append(args, "--")
 		args = append(args, steamPath, "-tenfoot")
 	}
 
-	// Środowisko
 	env := buildEnv(cfg)
-
 	LogEntry(fmt.Sprintf("START: %s %s", gsPath, strings.Join(args, " ")))
 	fmt.Printf("[gamescope-manager] Uruchamiam: gamescope %s\n", strings.Join(args, " "))
 
 	cmd := exec.Command(gsPath, args...)
 	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("nie można uruchomić gamescope: %w", err)
@@ -73,16 +52,14 @@ func Start(cfg Config) error {
 
 	pid := cmd.Process.Pid
 	fmt.Printf("[gamescope-manager] Sesja uruchomiona (PID: %d)\n", pid)
-	LogEntry(fmt.Sprintf("Sesja uruchomiona PID=%d", pid))
+	LogEntry(fmt.Sprintf("PID=%d", pid))
 
 	if err := WritePID(pid); err != nil {
 		fmt.Fprintf(os.Stderr, "[gamescope-manager] Ostrzeżenie: nie można zapisać PID: %v\n", err)
 	}
 
-	// Obsługa sygnałów — czysty shutdown
 	go watchSignals(cmd)
 
-	// Czekaj na zakończenie
 	waitErr := cmd.Wait()
 	RemovePID()
 
@@ -93,7 +70,6 @@ func Start(cfg Config) error {
 		LogEntry("Sesja zakończona normalnie")
 		fmt.Println("[gamescope-manager] Sesja gamescope zakończona.")
 	}
-
 	return nil
 }
 
@@ -103,61 +79,51 @@ func Stop() error {
 		fmt.Println("[gamescope-manager] Brak aktywnej sesji.")
 		return nil
 	}
-
 	pid := GetPIDInt()
 	if pid == -1 {
 		return fmt.Errorf("nie można odczytać PID sesji")
 	}
-
-	process, err := os.FindProcess(pid)
+	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("nie można znaleźć procesu PID %d: %w", pid, err)
 	}
-
 	fmt.Printf("[gamescope-manager] Zatrzymuję sesję (PID: %d)...\n", pid)
 	LogEntry(fmt.Sprintf("STOP: PID=%d", pid))
 
-	// Spróbuj SIGTERM
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		fmt.Fprintf(os.Stderr, "[gamescope-manager] SIGTERM nie powiódł się, używam SIGKILL...\n")
-		_ = process.Signal(syscall.SIGKILL)
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		_ = proc.Signal(syscall.SIGKILL)
 	}
-
-	// Poczekaj na zakończenie (max 5s)
 	for i := 0; i < 5; i++ {
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Second)
 		if !IsRunning() {
 			break
 		}
 		if i == 3 {
-			// Jeśli nadal żyje po 3s — SIGKILL
-			_ = process.Signal(syscall.SIGKILL)
+			_ = proc.Signal(syscall.SIGKILL)
 		}
 	}
-
 	RemovePID()
 	LogEntry("Sesja zatrzymana")
 	fmt.Println("[gamescope-manager] Sesja zatrzymana.")
 	return nil
 }
 
-// ShowStatus wyświetla status aktywnej sesji i konfigurację.
+// ShowStatus wyświetla status sesji i konfigurację.
 func ShowStatus() {
 	fmt.Println("[gamescope-manager] Status sesji:")
 	fmt.Println()
-
 	if IsRunning() {
 		fmt.Printf("  Status      : AKTYWNA\n")
 		fmt.Printf("  PID         : %s\n", ReadPID())
-		fmt.Printf("  Gamescope   : %s\n", processStatus("gamescope"))
-		fmt.Printf("  Steam       : %s\n", processStatus("steam"))
-		fmt.Printf("  MangoApp    : %s\n", processStatus("mangoapp"))
+		fmt.Printf("  Gamescope   : %s\n", procStatus("gamescope"))
+		fmt.Printf("  Steam       : %s\n", procStatus("steam"))
+		fmt.Printf("  MangoApp    : %s\n", procStatus("mangoapp"))
 	} else {
 		fmt.Println("  Status      : NIEAKTYWNA")
 	}
-
 	fmt.Println()
 	cfg := Load()
+	fmt.Printf("  Konfiguracja (.hk): %s\n", ConfigFile)
 	fmt.Printf("  Rozdzielczość : %dx%d @ %d Hz\n", cfg.Width, cfg.Height, cfg.RefreshRate)
 	fmt.Printf("  Fullscreen    : %v\n", cfg.Fullscreen)
 	fmt.Printf("  VSync         : %v\n", cfg.VSync)
@@ -170,19 +136,13 @@ func ShowStatus() {
 	fmt.Println()
 }
 
-// buildArgs buduje listę argumentów dla procesu gamescope.
 func buildArgs(cfg Config) []string {
 	var args []string
-
-	// Rozdzielczość wewnętrzna (gry renderują w tej rozdzielczości)
 	args = append(args, "-w", strconv.Itoa(cfg.Width))
 	args = append(args, "-h", strconv.Itoa(cfg.Height))
-	// Rozdzielczość wyjściowa (natywna monitora)
 	args = append(args, "-W", strconv.Itoa(cfg.Width))
 	args = append(args, "-H", strconv.Itoa(cfg.Height))
-	// Refresh rate
 	args = append(args, "-r", strconv.Itoa(cfg.RefreshRate))
-
 	if cfg.Fullscreen {
 		args = append(args, "-f")
 	}
@@ -195,106 +155,72 @@ func buildArgs(cfg Config) []string {
 	if cfg.MangoApp {
 		args = append(args, "--mangoapp")
 	}
-
-	// Tryb zagnieżdżony jeśli mamy już serwer wyświetlania
 	if os.Getenv("WAYLAND_DISPLAY") != "" || os.Getenv("DISPLAY") != "" {
 		args = append(args, "--nested")
 	}
-	// Bez serwera wyświetlania — gamescope działa na KMS/TTY (tryb standalone)
-
 	args = append(args, cfg.ExtraFlags...)
 	return args
 }
 
-// buildEnv buduje środowisko dla sesji gamescope + Steam.
 func buildEnv(cfg Config) []string {
 	env := os.Environ()
-
-	env = appendIfMissing(env, "XDG_SESSION_TYPE", "wayland")
-	env = appendIfMissing(env, "XDG_CURRENT_DESKTOP", "gamescope")
-	env = appendIfMissing(env, "XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", os.Getuid()))
-
-	// Steam — optymalizacje dla gamescope
-	env = appendIfMissing(env, "STEAM_USE_DYNAMIC_VRS", "1")
-	env = appendIfMissing(env, "STEAM_GAMESCOPE_COLOR_MANAGED", "1")
-	env = appendIfMissing(env, "STEAM_GAMESCOPE_TEARING_SUPPORTED", "1")
-	env = appendIfMissing(env, "GAMESCOPE_WAYLAND_DISPLAY", "gamescope-0")
-
-	// Mesa / Vulkan
-	env = appendIfMissing(env, "MESA_VK_WSI_PRESENT_MODE", "mailbox")
-
-	// Proton
-	env = appendIfMissing(env, "STEAM_COMPAT_CLIENT_INSTALL_PATH", steamDir())
-
+	env = appendMissing(env, "XDG_SESSION_TYPE", "wayland")
+	env = appendMissing(env, "XDG_CURRENT_DESKTOP", "gamescope")
+	env = appendMissing(env, "XDG_RUNTIME_DIR", fmt.Sprintf("/run/user/%d", os.Getuid()))
+	env = appendMissing(env, "STEAM_USE_DYNAMIC_VRS", "1")
+	env = appendMissing(env, "STEAM_GAMESCOPE_COLOR_MANAGED", "1")
+	env = appendMissing(env, "STEAM_GAMESCOPE_TEARING_SUPPORTED", "1")
+	env = appendMissing(env, "GAMESCOPE_WAYLAND_DISPLAY", "gamescope-0")
+	env = appendMissing(env, "MESA_VK_WSI_PRESENT_MODE", "mailbox")
+	env = appendMissing(env, "STEAM_COMPAT_CLIENT_INSTALL_PATH", steamDir())
 	if cfg.HDR {
-		env = appendIfMissing(env, "DXVK_HDR", "1")
+		env = appendMissing(env, "DXVK_HDR", "1")
 	}
 	if cfg.MangoApp {
-		env = appendIfMissing(env, "MANGOHUD", "1")
+		env = appendMissing(env, "MANGOHUD", "1")
 	}
-
 	return env
 }
 
-// watchSignals obsługuje SIGINT/SIGTERM przekazując je do procesu gamescope.
 func watchSignals(cmd *exec.Cmd) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	sig := <-ch
-	fmt.Printf("\n[gamescope-manager] Otrzymano %v, zamykam sesję...\n", sig)
+	fmt.Printf("\n[gamescope-manager] Sygnał %v — zamykam sesję...\n", sig)
 	if cmd.Process != nil {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 	}
 }
 
-// findBinary szuka pliku wykonywalnego w /usr/bin, /usr/games, potem PATH.
 func findBinary(name string) (string, error) {
-	candidates := []string{
-		"/usr/bin/" + name,
-		"/usr/local/bin/" + name,
-		"/usr/games/" + name,
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
+	for _, p := range []string{"/usr/bin/" + name, "/usr/local/bin/" + name, "/usr/games/" + name} {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
 		}
 	}
 	return exec.LookPath(name)
 }
 
-// findSteam szuka pliku wykonywalnego Steam.
 func findSteam() (string, error) {
-	candidates := []string{
-		"/usr/bin/steam",
-		"/usr/games/steam",
-		"/usr/local/bin/steam",
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
+	for _, p := range []string{"/usr/bin/steam", "/usr/games/steam", "/usr/local/bin/steam"} {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
 		}
 	}
 	return exec.LookPath("steam")
 }
 
-// steamDir zwraca katalog instalacji Steam.
 func steamDir() string {
 	home, _ := os.UserHomeDir()
-	candidates := []string{
-		filepath.Join(home, ".local/share/Steam"),
-		"/usr/share/steam",
-		"/opt/steam",
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
+	for _, p := range []string{filepath.Join(home, ".local/share/Steam"), "/usr/share/steam", "/opt/steam"} {
+		if _, err := os.Stat(p); err == nil {
+			return p
 		}
 	}
 	return filepath.Join(home, ".local/share/Steam")
 }
 
-// appendIfMissing dodaje zmienną środowiskową tylko jeśli nie jest jeszcze ustawiona.
-func appendIfMissing(env []string, key, value string) []string {
+func appendMissing(env []string, key, value string) []string {
 	prefix := key + "="
 	for _, e := range env {
 		if strings.HasPrefix(e, prefix) {
@@ -304,8 +230,7 @@ func appendIfMissing(env []string, key, value string) []string {
 	return append(env, prefix+value)
 }
 
-// processStatus zwraca status procesu o podanej nazwie.
-func processStatus(name string) string {
+func procStatus(name string) string {
 	if exec.Command("pgrep", "-x", name).Run() == nil {
 		return "uruchomiony"
 	}
