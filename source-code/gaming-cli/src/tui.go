@@ -96,37 +96,37 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
-		case tea.WindowSizeMsg:
-			m.width = msg.Width
-			m.height = msg.Height
-			return m, nil
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
 
-		case spinner.TickMsg:
-			if m.state == stateLoading {
-				var cmd tea.Cmd
-				m.spinner, cmd = m.spinner.Update(msg)
-				return m, cmd
-			}
-			return m, nil
+	case spinner.TickMsg:
+		if m.state == stateLoading {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 
-		case switchDoneMsg:
-			if msg.err != nil {
-				m.state = stateError
-				m.errMsg = msg.err.Error()
-			} else {
-				mode, _ := CurrentMode()
-				m.currentMode = mode
-				m.state = stateDone
-			}
-			return m, nil
+	case switchDoneMsg:
+		if msg.err != nil {
+			m.state = stateError
+			m.errMsg = msg.err.Error()
+		} else {
+			mode, _ := CurrentMode()
+			m.currentMode = mode
+			m.state = stateDone
+		}
+		return m, nil
 
-		case infoReadyMsg:
-			m.info = msg.info
-			m.state = stateInfo
-			return m, nil
+	case infoReadyMsg:
+		m.info = msg.info
+		m.state = stateInfo
+		return m, nil
 
-		case tea.KeyMsg:
-			return m.handleKey(msg)
+	case tea.KeyMsg:
+		return m.handleKey(msg)
 	}
 
 	return m, nil
@@ -135,37 +135,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.state {
 
-		case stateMenu:
-			switch msg.String() {
-				case "up", "k":
-					if m.cursor > 0 {
-						m.cursor--
-					} else {
-						m.cursor = len(menuItems) - 1
-					}
-				case "down", "j":
-					if m.cursor < len(menuItems)-1 {
-						m.cursor++
-					} else {
-						m.cursor = 0
-					}
-				case "enter", " ":
-					return m.execAction(menuItems[m.cursor].action)
-				case "q", "ctrl+c", "esc":
-					return m, tea.Quit
+	case stateMenu:
+		switch msg.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			} else {
+				m.cursor = len(menuItems) - 1
 			}
+		case "down", "j":
+			if m.cursor < len(menuItems)-1 {
+				m.cursor++
+			} else {
+				m.cursor = 0
+			}
+		case "enter", " ":
+			return m.execAction(menuItems[m.cursor].action)
+		case "q", "ctrl+c", "esc":
+			return m, tea.Quit
+		}
 
-				case stateInfo:
-					switch msg.String() {
-						case "q", "esc", "backspace":
-							m.state = stateMenu
-					}
+	case stateInfo:
+		switch msg.String() {
+		case "q", "esc", "backspace":
+			m.state = stateMenu
+		}
 
-						case stateDone, stateError:
-							switch msg.String() {
-								case "q", "esc", "enter", "backspace":
-									m.state = stateMenu
-							}
+	case stateDone, stateError:
+		switch msg.String() {
+		case "q", "esc", "enter", "backspace":
+			m.state = stateMenu
+		}
 	}
 
 	return m, nil
@@ -173,50 +173,50 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) execAction(action menuAction) (tea.Model, tea.Cmd) {
 	switch action {
-		case actionQuit:
-			return m, tea.Quit
+	case actionQuit:
+		return m, tea.Quit
 
-		case actionSwitchGame:
-			m.state = stateLoading
-			m.loadingMsg = "Przełączam na tryb gry…"
-			m.doneMsg = "Tryb gry aktywny! 🎮"
-			return m, tea.Batch(
-				m.spinner.Tick,
-		       func() tea.Msg {
-			       err := SwitchToGame()
-			       return switchDoneMsg{err: err}
-		       },
-			)
+	case actionSwitchGame:
+		m.state = stateLoading
+		m.loadingMsg = "Przełączam na tryb gry…"
+		m.doneMsg = "Tryb gry aktywny! 🎮"
+		return m, tea.Batch(
+			m.spinner.Tick,
+			func() tea.Msg {
+				err := SwitchToGame()
+				return switchDoneMsg{err: err}
+			},
+		)
 
-		case actionSwitchDesktop:
-			m.state = stateLoading
-			m.loadingMsg = "Przełączam na KDE Plasma…"
-			m.doneMsg = "Tryb pulpitu aktywny! 🖥"
-			return m, tea.Batch(
-				m.spinner.Tick,
-		       func() tea.Msg {
-			       err := SwitchToDesktop()
-			       return switchDoneMsg{err: err}
-		       },
-			)
+	case actionSwitchDesktop:
+		m.state = stateLoading
+		m.loadingMsg = "Przełączam na KDE Plasma…"
+		m.doneMsg = "Tryb pulpitu aktywny! 🖥"
+		return m, tea.Batch(
+			m.spinner.Tick,
+			func() tea.Msg {
+				err := SwitchToDesktop()
+				return switchDoneMsg{err: err}
+			},
+		)
 
-		case actionInfo:
-			m.state = stateLoading
-			m.loadingMsg = "Zbieram informacje…"
-			return m, tea.Batch(
-				m.spinner.Tick,
-		       func() tea.Msg {
-			       info := GatherInfo()
-			       return infoReadyMsg{info: info}
-		       },
-			)
+	case actionInfo:
+		m.state = stateLoading
+		m.loadingMsg = "Zbieram informacje…"
+		return m, tea.Batch(
+			m.spinner.Tick,
+			func() tea.Msg {
+				info := GatherInfo()
+				return infoReadyMsg{info: info}
+			},
+		)
 
-		case actionGamescope:
-			// Wyjdź z TUI i uruchom gamescope interaktywnie
-			return m, tea.Sequence(
-				tea.Quit,
-			  func() tea.Msg { return nil },
-			)
+	case actionGamescope:
+		// Wyjdź z TUI i uruchom gamescope interaktywnie
+		return m, tea.Sequence(
+			tea.Quit,
+			func() tea.Msg { return nil },
+		)
 	}
 	return m, nil
 }
@@ -225,16 +225,16 @@ func (m Model) execAction(action menuAction) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	switch m.state {
-		case stateMenu:
-			return m.viewMenu()
-		case stateInfo:
-			return m.viewInfo()
-		case stateLoading:
-			return m.viewLoading()
-		case stateDone:
-			return m.viewDone()
-		case stateError:
-			return m.viewError()
+	case stateMenu:
+		return m.viewMenu()
+	case stateInfo:
+		return m.viewInfo()
+	case stateLoading:
+		return m.viewLoading()
+	case stateDone:
+		return m.viewDone()
+	case stateError:
+		return m.viewError()
 	}
 	return ""
 }
@@ -269,16 +269,16 @@ func (m Model) viewMenu() string {
 			sub   = lipgloss.NewStyle().Foreground(ColorSecondary).Render("  " + item.sublabel)
 			row   := fmt.Sprintf("  %s %s %s", cursor, icon, label)
 			sb.WriteString(lipgloss.NewStyle().
-			Background(lipgloss.Color("#1E1B4B")).
-			Width(m.width - 4).
-			PaddingLeft(2).
-			Render(row))
+				Background(lipgloss.Color("#1E1B4B")).
+				Width(m.width - 4).
+				PaddingLeft(2).
+				Render(row))
 			sb.WriteString("\n")
 			sb.WriteString(lipgloss.NewStyle().
-			Background(lipgloss.Color("#1E1B4B")).
-			Width(m.width - 4).
-			PaddingLeft(2).
-			Render(sub))
+				Background(lipgloss.Color("#1E1B4B")).
+				Width(m.width - 4).
+				PaddingLeft(2).
+				Render(sub))
 		} else {
 			cursor := "  "
 			label = StyleCmdName.Render(item.label)
@@ -309,8 +309,8 @@ func (m Model) viewInfo() string {
 	sb.WriteString("\n\n")
 
 	title := lipgloss.NewStyle().
-	Foreground(ColorAccent).Bold(true).
-	Render("  📊 Informacje o środowisku")
+		Foreground(ColorAccent).Bold(true).
+		Render("  📊 Informacje o środowisku")
 	sb.WriteString(title + "\n")
 	sb.WriteString("  " + Divider(m.width-4) + "\n\n")
 
@@ -330,16 +330,16 @@ func (m Model) viewInfo() string {
 
 		var val string
 		switch {
-			case strings.Contains(r.value, "NIE ZAINSTALOWANY"):
-				val = StyleValueBad.Render(r.value)
-			case strings.Contains(r.value, "game-mode"):
-				val = StyleValueGood.Render("🎮 " + r.value)
-			case strings.Contains(r.value, "desktop-mode"):
-				val = StyleValue.Render("🖥  " + r.value)
-			case strings.Contains(r.value, "zainstalowany"):
-				val = StyleValueGood.Render(r.value)
-			default:
-				val = StyleValue.Render(r.value)
+		case strings.Contains(r.value, "NIE ZAINSTALOWANY"):
+			val = StyleValueBad.Render(r.value)
+		case strings.Contains(r.value, "game-mode"):
+			val = StyleValueGood.Render("🎮 " + r.value)
+		case strings.Contains(r.value, "desktop-mode"):
+			val = StyleValue.Render("🖥  " + r.value)
+		case strings.Contains(r.value, "zainstalowany"):
+			val = StyleValueGood.Render(r.value)
+		default:
+			val = StyleValue.Render(r.value)
 		}
 
 		sb.WriteString("  " + label + sep + val + "\n")
@@ -398,8 +398,8 @@ func (m Model) viewError() string {
 func renderBanner() string {
 	line1 := StyleBannerTitle.Render("  HackerOS Gaming Edition")
 	line2 := StyleBannerSub.Render("  gaming-cli") +
-	StyleDivider.Render(" ─ ") +
-	StyleBannerTag.Render("v0.0.1  ·  Debian Testing (Forky)  ·  PC / Laptop")
+		StyleDivider.Render(" ─ ") +
+		StyleBannerTag.Render("v0.0.1  ·  Debian Testing (Forky)  ·  PC / Laptop")
 	return line1 + "\n" + line2
 }
 
