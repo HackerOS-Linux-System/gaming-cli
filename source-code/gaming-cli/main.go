@@ -14,12 +14,12 @@ const version = "0.0.1"
 
 func printBanner() {
 	title := lipgloss.NewStyle().Bold(true).Foreground(src.ColorPrimary).
-	Render("  HackerOS Gaming Edition")
+		Render("  HackerOS Gaming Edition")
 	sub := lipgloss.NewStyle().Foreground(src.ColorSecondary).
-	Render("  gaming-cli") +
-	lipgloss.NewStyle().Foreground(src.ColorDim).Render(" ─ ") +
-	lipgloss.NewStyle().Foreground(src.ColorAccent).Faint(true).
-	Render(fmt.Sprintf("v%s  ·  Debian Testing (Forky)  ·  PC / Laptop", version))
+		Render("  gaming-cli") +
+		lipgloss.NewStyle().Foreground(src.ColorDim).Render(" ─ ") +
+		lipgloss.NewStyle().Foreground(src.ColorAccent).Faint(true).
+		Render(fmt.Sprintf("v%s  ·  Debian Testing (Forky)  ·  PC / Laptop", version))
 	fmt.Println(title)
 	fmt.Println(sub)
 	fmt.Println()
@@ -82,7 +82,7 @@ func printInfoCmd() {
 	info := src.GatherInfo()
 
 	title := lipgloss.NewStyle().Foreground(src.ColorAccent).Bold(true).
-	Render("  📊 Środowisko gaming")
+		Render("  📊 Środowisko gaming")
 	fmt.Println(title)
 	fmt.Println("  " + src.Divider(56))
 
@@ -102,16 +102,16 @@ func printInfoCmd() {
 	for _, r := range rows {
 		var val string
 		switch {
-			case strings.Contains(r.value, "NIE ZAINSTALOWANY"):
-				val = src.StyleValueBad.Render(r.value)
-			case strings.Contains(r.value, "game-mode"):
-				val = src.StyleValueGood.Render("🎮 " + r.value)
-			case strings.Contains(r.value, "desktop-mode"):
-				val = src.StyleValue.Render("🖥  " + r.value)
-			case strings.Contains(r.value, "zainstalowany"):
-				val = src.StyleValueGood.Render(r.value)
-			default:
-				val = src.StyleValue.Render(r.value)
+		case strings.Contains(r.value, "NIE ZAINSTALOWANY"):
+			val = src.StyleValueBad.Render(r.value)
+		case strings.Contains(r.value, "game-mode"):
+			val = src.StyleValueGood.Render("🎮 " + r.value)
+		case strings.Contains(r.value, "desktop-mode"):
+			val = src.StyleValue.Render("🖥  " + r.value)
+		case strings.Contains(r.value, "zainstalowany"):
+			val = src.StyleValueGood.Render(r.value)
+		default:
+			val = src.StyleValue.Render(r.value)
 		}
 		fmt.Println("  " + lStyle.Render(r.label) + sep + val)
 	}
@@ -152,75 +152,75 @@ func main() {
 	// help i version nie wymagają weryfikacji dystrybucji
 	if cmd != "help" && cmd != "--help" && cmd != "-h" &&
 		cmd != "version" && cmd != "--version" {
-			if err := src.CheckDistro(); err != nil {
+		if err := src.CheckDistro(); err != nil {
+			printErr(err)
+			os.Exit(1)
+		}
+	}
+
+	switch cmd {
+	case "tui":
+		src.RunTUI()
+
+	case "switch":
+		if len(os.Args) < 3 {
+			printBanner()
+			printErr(fmt.Errorf("podaj tryb: game-mode lub desktop-mode"))
+			os.Exit(1)
+		}
+		target := strings.ToLower(os.Args[2])
+		printBanner()
+		switch target {
+		case "game-mode":
+			printWarn("Przełączam na tryb gry…")
+			if err := src.SwitchToGame(); err != nil {
 				printErr(err)
 				os.Exit(1)
 			}
+			printOK("Tryb gry aktywny! Miłej gry! 🎮")
+
+		case "desktop-mode":
+			printWarn("Przełączam na tryb pulpitu…")
+			if err := src.SwitchToDesktop(); err != nil {
+				printErr(err)
+				os.Exit(1)
+			}
+			printOK("KDE Plasma uruchomiona! 🖥")
+
+		default:
+			printErr(fmt.Errorf("nieznany tryb: %q — użyj game-mode lub desktop-mode", target))
+			os.Exit(1)
 		}
 
-		switch cmd {
-			case "tui":
-				src.RunTUI()
+	case "status":
+		printStatus()
 
-			case "switch":
-				if len(os.Args) < 3 {
-					printBanner()
-					printErr(fmt.Errorf("podaj tryb: game-mode lub desktop-mode"))
-					os.Exit(1)
-				}
-				target := strings.ToLower(os.Args[2])
-				printBanner()
-				switch target {
-					case "game-mode":
-						printWarn("Przełączam na tryb gry…")
-						if err := src.SwitchToGame(); err != nil {
-							printErr(err)
-							os.Exit(1)
-						}
-						printOK("Tryb gry aktywny! Miłej gry! 🎮")
+	case "info":
+		printInfoCmd()
 
-					case "desktop-mode":
-						printWarn("Przełączam na tryb pulpitu…")
-						if err := src.SwitchToDesktop(); err != nil {
-							printErr(err)
-							os.Exit(1)
-						}
-						printOK("KDE Plasma uruchomiona! 🖥")
-
-					default:
-						printErr(fmt.Errorf("nieznany tryb: %q — użyj game-mode lub desktop-mode", target))
-						os.Exit(1)
-				}
-
-					case "status":
-						printStatus()
-
-					case "info":
-						printInfoCmd()
-
-					case "gamescope":
-						if err := src.CheckDistro(); err != nil {
-							printErr(err)
-							os.Exit(1)
-						}
-						runGamescope(os.Args[2:])
-
-					case "version", "--version":
-						printBanner()
-						fmt.Printf("  gaming-cli %s\n", version)
-						fmt.Printf("  HackerOS Gaming Edition · Debian Testing (Forky)\n\n")
-
-					case "help", "--help", "-h":
-						printHelp()
-
-					default:
-						printBanner()
-						printErr(fmt.Errorf("nieznana komenda: %q", cmd))
-						fmt.Println("  Użyj " +
-						lipgloss.NewStyle().Foreground(src.ColorAccent).Render("gaming-cli help") +
-						" aby uzyskać pomoc.")
-						os.Exit(1)
+	case "gamescope":
+		if err := src.CheckDistro(); err != nil {
+			printErr(err)
+			os.Exit(1)
 		}
+		runGamescope(os.Args[2:])
+
+	case "version", "--version":
+		printBanner()
+		fmt.Printf("  gaming-cli %s\n", version)
+		fmt.Printf("  HackerOS Gaming Edition · Debian Testing (Forky)\n\n")
+
+	case "help", "--help", "-h":
+		printHelp()
+
+	default:
+		printBanner()
+		printErr(fmt.Errorf("nieznana komenda: %q", cmd))
+		fmt.Println("  Użyj " +
+			lipgloss.NewStyle().Foreground(src.ColorAccent).Render("gaming-cli help") +
+			" aby uzyskać pomoc.")
+		os.Exit(1)
+	}
 }
 
 func runGamescope(args []string) {
