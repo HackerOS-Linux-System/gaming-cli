@@ -21,88 +21,88 @@ var (
 
 	// Nagłówek / baner
 	StyleBannerBox = lipgloss.NewStyle().
-	BorderStyle(lipgloss.RoundedBorder()).
-	BorderForeground(ColorPrimary).
-	Padding(0, 2)
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(ColorPrimary).
+			Padding(0, 2)
 
 	StyleBannerTitle = lipgloss.NewStyle().
-	Bold(true).
-	Foreground(ColorPrimary)
+				Bold(true).
+				Foreground(ColorPrimary)
 
 	StyleBannerSub = lipgloss.NewStyle().
-	Foreground(ColorSecondary)
+			Foreground(ColorSecondary)
 
 	StyleBannerTag = lipgloss.NewStyle().
-	Foreground(ColorAccent).
-	Faint(true)
+			Foreground(ColorAccent).
+			Faint(true)
 
 	// Status / info
 	StyleLabel = lipgloss.NewStyle().
-	Foreground(ColorGray).
-	Width(16)
+			Foreground(ColorGray).
+			Width(16)
 
 	StyleValue = lipgloss.NewStyle().
-	Foreground(ColorWhite).
-	Bold(true)
+			Foreground(ColorWhite).
+			Bold(true)
 
 	StyleValueGood = lipgloss.NewStyle().
-	Foreground(ColorGreen).
-	Bold(true)
+			Foreground(ColorGreen).
+			Bold(true)
 
 	StyleValueBad = lipgloss.NewStyle().
-	Foreground(ColorRed).
-	Bold(true)
+			Foreground(ColorRed).
+			Bold(true)
 
 	StyleValueWarn = lipgloss.NewStyle().
-	Foreground(ColorYellow).
-	Bold(true)
+			Foreground(ColorYellow).
+			Bold(true)
 
 	// Separator / divider
 	StyleDivider = lipgloss.NewStyle().
-	Foreground(ColorDim)
+			Foreground(ColorDim)
 
 	// Komenda w helpie
 	StyleCmdName = lipgloss.NewStyle().
-	Foreground(ColorAccent).
-	Bold(true)
+			Foreground(ColorAccent).
+			Bold(true)
 
 	StyleCmdDesc = lipgloss.NewStyle().
-	Foreground(ColorGray)
+			Foreground(ColorGray)
 
 	StyleCmdArg = lipgloss.NewStyle().
-	Foreground(ColorSecondary)
+			Foreground(ColorSecondary)
 
 	// Badge trybu
 	StyleBadgeGame = lipgloss.NewStyle().
-	Background(ColorPrimary).
-	Foreground(ColorWhite).
-	Bold(true).
-	Padding(0, 1)
+			Background(ColorPrimary).
+			Foreground(ColorWhite).
+			Bold(true).
+			Padding(0, 1)
 
 	StyleBadgeDesktop = lipgloss.NewStyle().
-	Background(lipgloss.Color("#1E40AF")).
-	Foreground(ColorWhite).
-	Bold(true).
-	Padding(0, 1)
+				Background(lipgloss.Color("#1E40AF")).
+				Foreground(ColorWhite).
+				Bold(true).
+				Padding(0, 1)
 
 	// Błąd / sukces
 	StyleError = lipgloss.NewStyle().
-	Foreground(ColorRed).
-	Bold(true)
+			Foreground(ColorRed).
+			Bold(true)
 
 	StyleSuccess = lipgloss.NewStyle().
-	Foreground(ColorGreen).
-	Bold(true)
+			Foreground(ColorGreen).
+			Bold(true)
 
 	StyleWarn = lipgloss.NewStyle().
-	Foreground(ColorYellow).
-	Bold(true)
+			Foreground(ColorYellow).
+			Bold(true)
 
 	// Sekcja w helpie
 	StyleSection = lipgloss.NewStyle().
-	Foreground(ColorPrimary).
-	Bold(true).
-	MarginTop(1)
+			Foreground(ColorPrimary).
+			Bold(true).
+			MarginTop(1)
 )
 
 // Divider zwraca poziomą linię dekoracyjną o podanej szerokości.
