@@ -1,13 +1,35 @@
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Switch to Game Mode
-Name[pl]=Przełącz na tryb gry
-Comment=Switch HackerOS to Gamescope + Steam Big Picture Mode
-Comment[pl]=Przełącza HackerOS na tryb gry (Gamescope + Steam BPM)
-Exec=pkexec /usr/bin/gaming-cli switch game-mode
-Icon=/usr/lib/HackerOS/icons/steam-gaming-return.svg
-Terminal=false
-Categories=Game;System;
-Keywords=game;gaming;gamescope;steam;hackeros;
-StartupNotify=true
+[Unit]
+Description=HackerOS Game Mode (Gamescope + Steam Big Picture)
+After=systemd-user-sessions.service network.target sound.target
+# NIE ma Conflicts=sddm.service — celowo, zeby SDDM/KDE nadal dzialaly na tty2
+Wants=systemd-logind.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gamescope-manager start --steam
+ExecStop=/usr/bin/gamescope-manager stop
+Restart=on-failure
+RestartSec=5s
+
+# TTY3 — tty2 jest zarezerwowane dla SDDM/KDE w HackerOS
+StandardInput=tty
+TTYPath=/dev/tty3
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=no
+
+# Przełącz na tty3 przy starcie, wróć na tty2 przy zatrzymaniu
+ExecStartPre=/bin/chvt 3
+ExecStopPost=/bin/chvt 2
+
+# Środowisko sesji
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_CURRENT_DESKTOP=gamescope
+Environment=XDG_SESSION_CLASS=user
+
+# Capabilities dla trybu gry (bez pełnego roota dla gamescope)
+# gamescope-manager sam jest rootem, gamescope uruchamiany z właściwymi uprawnieniami
+AmbientCapabilities=CAP_SYS_NICE
+
+[Install]
+WantedBy=multi-user.target
