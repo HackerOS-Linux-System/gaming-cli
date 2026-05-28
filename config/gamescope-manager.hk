@@ -1,15 +1,100 @@
 ! HackerOS Gamescope Manager — konfiguracja (format .hk)
-! Edytuj ręcznie lub przez: gamescope-manager config set <klucz> <wartość>
-! Dokumentacja formatu .hk:
-!   https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html
+! Edytuj recznie lub przez: sudo gamescope-manager config set <klucz> <wartosc>
+! Lub przez: gaming-cli tui -> Ustawienia Steam
+!
+! Format .hk: https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html
+!
+! UWAGA: gamescope-manager wymaga sudo (zapisuje do /var/lib/ i /var/log/)
+!        Zmienne srodowiskowe HACKEROS_GS_* i HACKEROS_ST_* nadpisuja ten plik.
 
 [gamescope]
+! Rozdzielczosc wyjsciowa gamescope
 -> width       => 1920
 -> height      => 1080
+
+! Czestotliwosc odswiezania (Hz)
 -> refresh     => 60
+
+! Tryb pelnoekranowy (zalecany dla game mode)
 -> fullscreen  => true
+
+! Adaptive sync / VSync (--adaptive-sync w gamescope)
 -> vsync       => true
+
+! HDR — wymaga karty graficznej i monitora z obsluga HDR
 -> hdr         => false
+
+! MangoHUD overlay z FPS i statystykami GPU/CPU
 -> mangoapp    => true
+
+! Automatyczne uruchomienie Steam przy starcie sesji
 -> auto_steam  => true
+
+! Wymus kompozytor gamescope nawet gdy nie jest potrzebny
+-> force_composite => false
+
+! Dodatkowe flagi gamescope (lista, np. ["--expose-wayland", "--rt"])
 -> extra_flags => []
+
+
+[steam]
+! === TRYB URUCHOMIENIA ===
+
+! Tryb Big Picture / Steam Deck UI (-tenfoot)
+! true  = interfejs TV/Steam Deck (zalecany dla game mode)
+! false = normalny interfejs pulpitu
+-> big_picture => true
+
+! Tryb VR (-vr) — uruchamia SteamVR
+-> vr => false
+
+
+! === WYDAJNOSC I STABILNOSC ===
+
+! Wylacz sandbox przegladarki CEF w Steam (-no-cef-sandbox)
+! Zalecane dla gamescope — przyspiesza uruchamianie Steam
+-> no_cef_sandbox => true
+
+! Tryb TCP zamiast UNIX socket (-nosharedmemory)
+! Wlacz jesli masz problemy z polaczeniem Steam <-> gry
+-> tcp_mode => false
+
+! Nie weryfikuj integralnosci plikow gier przy kazdym starcie (-noverifyfiles)
+-> no_verify => false
+
+! Pelna rozdzielczosc ekranu w trybie pulpitu (-fulldesktopres)
+-> full_desktop_res => false
+
+! Wylacz akceleracje sprzetowa w interfejsie Steam (-disable-gpu)
+! Pomocne na starszych kartach graficznych z problemami z UI
+-> disable_hwa => false
+
+! Zezwol na zaszyfrowane urzadzenia HID (-allow-hidcrypto)
+! Potrzebne dla niektorych kontrolerow z szyfrowaniem
+-> allow_hidcrypto => false
+
+
+! === KANAL AKTUALIZACJI ===
+
+! Kanal beta Steam
+! Dostepne wartosci:
+!   ""              — stabilny (domyslny)
+!   "beta"          — ogolny kanal beta
+!   "steamdeckbeta" — Steam Deck UI beta (nowe funkcje UI)
+!   "beta-client"   — klient beta
+-> beta_channel => ""
+
+
+! === JEZYK ===
+
+! Jezyk interfejsu Steam
+! Dostepne: "" (systemowy), polish, english, german, french,
+!           spanish, russian, czech, hungarian, turkish
+-> language => ""
+
+
+! === DODATKOWE FLAGI ===
+
+! Dodatkowe flagi przekazywane bezposrednio do procesu steam
+! Przyklad: "-silent -console"
+-> extra_flags => ""
