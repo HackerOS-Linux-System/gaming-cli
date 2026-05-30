@@ -1,100 +1,149 @@
-! HackerOS Gamescope Manager — konfiguracja (format .hk)
+! HackerOS Gamescope Manager — konfiguracja (format .hk) v0.2
 ! Edytuj recznie lub przez: sudo gamescope-manager config set <klucz> <wartosc>
 ! Lub przez: gaming-cli tui -> Ustawienia Steam
 !
-! Format .hk: https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html
+! AUTO-DETEKCJA ROZDZIELCZOSCI:
+!   width=0 i height=0 = gamescope-manager automatycznie wykryje
+!   natywna rozdzielczosc monitora przez /sys/class/drm (bez X/Wayland).
+!   Kolejnosc detekcji: DRM sysfs -> xrandr -> drm_info -> fallback DRM auto.
+!   Ustaw niezerowa wartosc tylko jesli chcesz WYMUSIC konkretna rozdzielczosc.
 !
-! UWAGA: gamescope-manager wymaga sudo (zapisuje do /var/lib/ i /var/log/)
-!        Zmienne srodowiskowe HACKEROS_GS_* i HACKEROS_ST_* nadpisuja ten plik.
+! SPRAWDZENIE DETEKCJI: sudo gamescope-manager detect
+! HEALTH CHECK:         sudo gamescope-manager health
+!
+! Format .hk: https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html
+! Zmienne env HACKEROS_GS_* i HACKEROS_ST_* nadpisuja ten plik.
 
 [gamescope]
-! Rozdzielczosc wyjsciowa gamescope
--> width       => 1920
--> height      => 1080
 
-! Czestotliwosc odswiezania (Hz)
--> refresh     => 60
+! === ROZDZIELCZOSC WYJSCIOWA ===
+! 0 = auto-detekcja przez DRM (zalecane)
+! Zmien na konkretna wartosc (np. 1920, 1080) tylko jesli auto nie dziala.
+-> width  => 0
+-> height => 0
 
-! Tryb pelnoekranowy (zalecany dla game mode)
--> fullscreen  => true
+! Czestotliwosc odswiezania (Hz). 0 = auto (gamescope wykryje z monitora).
+-> refresh => 0
 
-! Adaptive sync / VSync (--adaptive-sync w gamescope)
--> vsync       => true
+! === WYSWIETLANIE ===
+! Tryb pelnoekranowy (zalecany dla game mode — gamescope przejmuje DRM)
+-> fullscreen => true
 
-! HDR — wymaga karty graficznej i monitora z obsluga HDR
--> hdr         => false
+! Adaptive sync / VRR / FreeSync / G-Sync
+! Wymaga monitora i karty graficznej z obsługa VRR
+-> vsync => true
 
-! MangoHUD overlay z FPS i statystykami GPU/CPU
--> mangoapp    => true
+! HDR — wymaga kernela >= 6.4, sterownika z obsługa HDR i monitora HDR
+-> hdr => false
 
-! Automatyczne uruchomienie Steam przy starcie sesji
--> auto_steam  => true
+! === SKALOWANIE (UPSCALING) ===
+! Tryby skalowania gdy gra renderuje w nizszej rozdzielczosci niz ekran:
+!   auto    — gamescope wybiera najlepszy tryb
+!   integer — piksel-perfect (np. 1080p -> 4K bez rozmycia)
+!   fit     — zachowaj proporcje (letterbox/pillarbox)
+!   fill    — wypelnij ekran (moze ucinac krawedzie)
+!   stretch — rozciagnij (znieksztalca proporcje)
+-> scaling_mode => auto
+
+! Filtr interpolacji przy skalowaniu:
+!   linear  — lekkie rozmycie, ogolny cel
+!   pixel   — ostry, do gier pixel-art
+!   fsr     — AMD FidelityFX Super Resolution (spatial upscaling, dziala na każdym GPU)
+!   nis     — NVIDIA Image Scaling (tez dziala na AMD i Intel)
+!   nearest — brak filtrowania, najostrzejszy
+-> scaling_filter => linear
+
+! Ostrosc FSR (0 = max ostrosc, 20 = max rozmycie). Aktywne gdy filter=fsr.
+-> fsr_sharpness => 5
+
+! Ostrosc NIS (0 = max ostrosc, 20 = max rozmycie). Aktywne gdy filter=nis.
+-> nis_sharpness => 5
+
+! === ROZDZIELCZOSC WEWNETRZNA (opcjonalne) ===
+! Rozdzielczosc w jakiej gamescope renderuje wewnetrznie.
+! 0 = taka sama jak width/height (brak skalowania).
+! Przyklad: internal=1280x720 + output=1920x1080 → gamescope upskaluje 720p → 1080p.
+-> internal_width  => 0
+-> internal_height => 0
+
+! === ZLACZE WIDEO ===
+! Preferowane wyjscie wideo. Puste = automatyczny wybor (najlepsze dostepne).
+! Przyklady: HDMI-A-1, DP-1, eDP-1, VGA-1
+! Sprawdz dostepne: ls /sys/class/drm/
+-> output_connector => ""
+
+! Wlasne czestotliwosci odswiezania dla VRR (przecinkami, np. "40,50,60").
+! Puste = wszystkie obsługiwane przez monitor.
+-> custom_refresh_rates => ""
+
+! === OVERLAYE I NARZEDZIA ===
+! MangoHUD / mangoapp — overlay z FPS, GPU, CPU, VRAM, temperatura
+-> mangoapp => true
 
 ! Wymus kompozytor gamescope nawet gdy nie jest potrzebny
 -> force_composite => false
 
-! Dodatkowe flagi gamescope (lista, np. ["--expose-wayland", "--rt"])
+! === STEAM ===
+! Automatyczne uruchomienie Steam przy starcie sesji
+-> auto_steam => true
+
+! === DODATKOWE FLAGI GAMESCOPE ===
+! Przyklad: ["--expose-wayland", "--rt", "--generate-drm-mode", "1920x1080@144"]
 -> extra_flags => []
 
 
 [steam]
+
 ! === TRYB URUCHOMIENIA ===
 
-! Tryb Big Picture / Steam Deck UI (-tenfoot)
-! true  = interfejs TV/Steam Deck (zalecany dla game mode)
-! false = normalny interfejs pulpitu
+! Steam Big Picture / Steam Deck UI (-gamepadui -steamos3)
+! true  = pelny interfejs telewizyjny/gamingowy (zalecany)
+! false = normalny interfejs pulpitu Steam
 -> big_picture => true
 
-! Tryb VR (-vr) — uruchamia SteamVR
+! Steam VR — uruchamia SteamVR zamiast normalnej sesji
 -> vr => false
-
 
 ! === WYDAJNOSC I STABILNOSC ===
 
 ! Wylacz sandbox przegladarki CEF w Steam (-no-cef-sandbox)
-! Zalecane dla gamescope — przyspiesza uruchamianie Steam
+! ZALECANE dla gamescope — przyspiesza start, mniejsze zuzycie pamieci
 -> no_cef_sandbox => true
 
 ! Tryb TCP zamiast UNIX socket (-nosharedmemory)
-! Wlacz jesli masz problemy z polaczeniem Steam <-> gry
+! Wlacz gdy masz problemy z polaczeniem miedzy Steam a grami
 -> tcp_mode => false
 
-! Nie weryfikuj integralnosci plikow gier przy kazdym starcie (-noverifyfiles)
+! Nie weryfikuj integralnosci plikow gier przy starcie (-noverifyfiles)
+! Przyspiesza start Steam, ale bledy w plikach moga nie zostac wykryte
 -> no_verify => false
 
 ! Pelna rozdzielczosc ekranu w trybie pulpitu (-fulldesktopres)
 -> full_desktop_res => false
 
-! Wylacz akceleracje sprzetowa w interfejsie Steam (-disable-gpu)
-! Pomocne na starszych kartach graficznych z problemami z UI
+! Wylacz hardware acceleration w interfejsie Steam (-disable-gpu)
+! Pomocne na starszych kartach z problemami z renderowaniem UI
 -> disable_hwa => false
 
 ! Zezwol na zaszyfrowane urzadzenia HID (-allow-hidcrypto)
-! Potrzebne dla niektorych kontrolerow z szyfrowaniem
+! Potrzebne dla niektorych kontrolerow z szyfrowaniem komunikacji
 -> allow_hidcrypto => false
 
+! === AKTUALIZACJE ===
 
-! === KANAL AKTUALIZACJI ===
-
-! Kanal beta Steam
-! Dostepne wartosci:
-!   ""              — stabilny (domyslny)
+! Kanal beta Steam. Dostepne:
+!   ""              — stabilny (domyslny, zalecany)
 !   "beta"          — ogolny kanal beta
-!   "steamdeckbeta" — Steam Deck UI beta (nowe funkcje UI)
+!   "steamdeckbeta" — Steam Deck UI beta (nowszy interfejs, moze byc niestabilny)
 !   "beta-client"   — klient beta
 -> beta_channel => ""
 
-
 ! === JEZYK ===
-
-! Jezyk interfejsu Steam
-! Dostepne: "" (systemowy), polish, english, german, french,
-!           spanish, russian, czech, hungarian, turkish
+! Jezyk interfejsu Steam. Puste = jezyk systemowy.
+! Dostepne: polish, english, german, french, spanish, russian, czech, hungarian, turkish
 -> language => ""
 
-
-! === DODATKOWE FLAGI ===
-
-! Dodatkowe flagi przekazywane bezposrednio do procesu steam
-! Przyklad: "-silent -console"
+! === DODATKOWE FLAGI STEAM ===
+! Dowolne dodatkowe flagi przekazywane do procesu steam.
+! Przyklad: "-console -silent"
 -> extra_flags => ""
