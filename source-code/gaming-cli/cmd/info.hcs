@@ -1,0 +1,101 @@
+get <std:string> import <str_trim::str_split::str_contains::str_index_of>
+get <work:common::sys> import <capture_or::find_binary::read_trimmed>
+get <work:common::distro> import <os_release_path::kv_or>
+get <work:common::mode> import <current_mode_or_default>
+
+struct EnvInfo [
+    pretty_name: Str,
+    debian_ver: Str,
+    kernel: Str,
+    gpu: Str,
+    gamescope: Str,
+    steam: Str,
+    current_mode: Str
+]
+
+fun gamescope_version() -> Str [
+    match find_binary("gamescope") [
+        None -> [
+            end "NIE ZAINSTALOWANY"
+        ]
+        Some(p) -> [
+            let v = capture_or(p.clone(), ["--version"], "")
+            if v.len() == 0 [
+                end "zainstalowany (" + p + ")"
+            ]
+            end v
+        ]
+    ]
+]
+
+fun steam_status() -> Str [
+    let names: List<Str> = ["steam", "steam-runtime", "steam-native"]
+    for n in names [
+        match find_binary(n) [
+            Some(p) -> [
+                end "zainstalowany (" + p + ")"
+            ]
+            None -> [
+            ]
+        ]
+    ]
+    end "NIE ZAINSTALOWANY"
+]
+
+fun detect_gpu() -> Str [
+    let no_args: List<Str> = []
+    match run_command("lspci", no_args) [
+        Err(_e) -> [
+            end "nieznane (brak lspci)"
+        ]
+        Ok(out) -> [
+            let gpus: List<Str> = []
+            for raw in str_split(out, "\n") [
+                let line: Str = raw
+                let lo = line.to_lowercase()
+                if str_contains(lo.clone(), "vga") or str_contains(lo.clone(), "3d controller") or str_contains(lo.clone(), "display controller") [
+                    match str_index_of(line.clone(), ": ") [
+                        Some(i) -> [
+                            gpus.push(str_trim(line.slice(i + 2, line.len())))
+                        ]
+                        None -> [
+                        ]
+                    ]
+                ]
+            ]
+            if gpus.len() == 0 [
+                end "nieznane"
+            ]
+            let joined: Str = ""
+            let k = 0
+            while k < gpus.len() [
+                if k > 0 [
+                    joined = joined + " | "
+                ]
+                joined = joined + gpus[k]
+                k = k + 1
+            ]
+            end joined
+        ]
+    ]
+]
+
+fun gather_info() -> EnvInfo [
+    let pretty = kv_or(os_release_path(), "PRETTY_NAME", false, "nieznane")
+    let deb = read_trimmed("/etc/debian_version", "nieznane")
+    let kern = capture_or("uname", ["-r"], "nieznane")
+    end EnvInfo(pretty, deb, kern, detect_gpu(), gamescope_version(), steam_status(), current_mode_or_default())
+]
+
+!! Wiersze (etykieta, wartosc) do wyswietlenia.
+fun info_rows(i: EnvInfo) -> List<List<Str>> [
+    end [
+        ["Dystrybucja", i.pretty_name.clone()],
+        ["Debian", i.debian_ver.clone()],
+        ["Jądro", i.kernel.clone()],
+        ["GPU", i.gpu.clone()],
+        ["Gamescope", i.gamescope.clone()],
+        ["Steam", i.steam.clone()],
+        ["Tryb", i.current_mode.clone()]
+    ]
+]
