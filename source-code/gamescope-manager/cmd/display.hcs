@@ -1,0 +1,386 @@
+get <std:string> import <str_trim::str_split::str_starts_with::str_contains::str_index_of>
+get <work:common::sys> import <find_binary::env_nonempty::env_or::parse_int_or>
+
+struct DisplayInfo [
+    width: Int,
+    height: Int,
+    refresh: Int,
+    connector: Str,
+    source: Str
+]
+
+fun display_fallback() -> DisplayInfo [
+    end DisplayInfo(0, 0, 60, "", "fallback")
+]
+
+struct ModeLine [
+    w: Int,
+    h: Int,
+    r: Int
+]
+
+!! "1920x1080" albo "1920x1080@60.00" -> ModeLine (zera przy bledzie).
+fun parse_mode_line(line: Str) -> ModeLine [
+    let l: Str = str_trim(line)
+    let r = 0
+    match str_index_of(l.clone(), "@") [
+        Some(at) -> [
+            let rs: Str = str_trim(l.slice(at + 1, l.len()))
+            let int_part: Str = rs.clone()
+            match str_index_of(rs.clone(), ".") [
+                Some(dot) -> [
+                    int_part = rs.slice(0, dot)
+                ]
+                None -> [
+                ]
+            ]
+            r = parse_int_or(int_part, 0)
+            l = l.slice(0, at)
+        ]
+        None -> [
+        ]
+    ]
+    match str_index_of(l.clone(), "x") [
+        Some(xi) -> [
+            let w = parse_int_or(l.slice(0, xi), 0)
+            let h = parse_int_or(l.slice(xi + 1, l.len()), 0)
+            if w > 0 and h > 0 [
+                end ModeLine(w, h, r)
+            ]
+            end ModeLine(0, 0, r)
+        ]
+        None -> [
+            end ModeLine(0, 0, r)
+        ]
+    ]
+]
+
+!! Wyzszy = lepszy. Zewnetrzne zlacza (HDMI/DP) przed wbudowanym panelem laptopa.
+fun connector_priority(connector: Str) -> Int [
+    let lo = connector.to_lowercase()
+    if str_starts_with(lo.clone(), "hdmi") [
+        end 100
+    ]
+    if str_starts_with(lo.clone(), "dp-") or str_starts_with(lo.clone(), "displayport") [
+        end 90
+    ]
+    if str_contains(lo.clone(), "usb") [
+        end 80
+    ]
+    if str_starts_with(lo.clone(), "edp") or str_starts_with(lo.clone(), "lvds") [
+        end 50
+    ]
+    end 60
+]
+
+!! "card0-HDMI-A-1" -> "HDMI-A-1"
+fun connector_name(dir: Str) -> Str [
+    match str_index_of(dir.clone(), "-") [
+        Some(i) -> [
+            end dir.slice(i + 1, dir.len())
+        ]
+        None -> [
+            end dir
+        ]
+    ]
+]
+
+!! Odswiezanie z pliku current_mode (jesli sterownik go udostepnia).
+fun refresh_from_sysfs(dir: Str) -> Int [
+    match read_file(dir + "/current_mode") [
+        Ok(t) -> [
+            end parse_mode_line(t).r
+        ]
+        Err(_e) -> [
+            end 0
+        ]
+    ]
+]
+
+!! Katalog DRM; HACKEROS_GS_DRM_ROOT pozwala testowac detekcje na sztucznym drzewie.
+fun drm_root() -> Str [
+    end env_or("HACKEROS_GS_DRM_ROOT", "/sys/class/drm")
+]
+
+fun detect_via_drm() -> Option<DisplayInfo> [
+    let base = drm_root()
+    let entries = list_dir(base)
+    match entries [
+        Err(_e) -> [
+            end none()
+        ]
+        Ok(names) -> [
+            let best: Option<DisplayInfo> = none()
+            let best_pri = -1
+            for name in names [
+                if str_contains(name.clone(), "-") == false [
+                    continue
+                ]
+                let dir: Str = base + "/" + name
+                let status = ""
+                match read_file(dir + "/status") [
+                    Ok(t) -> [
+                        status = str_trim(t)
+                    ]
+                    Err(_e2) -> [
+                        continue
+                    ]
+                ]
+                if status != "connected" [
+                    continue
+                ]
+                let modes = ""
+                match read_file(dir + "/modes") [
+                    Ok(t2) -> [
+                        modes = str_trim(t2)
+                    ]
+                    Err(_e3) -> [
+                        continue
+                    ]
+                ]
+                if modes.len() == 0 [
+                    continue
+                ]
+                let first = str_split(modes, "\n")[0]
+                let ml = parse_mode_line(first)
+                if ml.w == 0 or ml.h == 0 [
+                    continue
+                ]
+                let r = ml.r
+                if r == 0 [
+                    r = refresh_from_sysfs(dir.clone())
+                    if r == 0 [
+                        r = 60
+                    ]
+                ]
+                let conn = connector_name(name.clone())
+                let pri = connector_priority(conn.clone())
+                if pri > best_pri [
+                    best_pri = pri
+                    best = some(DisplayInfo(ml.w, ml.h, r, conn, "drm"))
+                ]
+            ]
+            end best
+        ]
+    ]
+]
+
+fun detect_via_xrandr() -> Option<DisplayInfo> [
+    if env_nonempty("DISPLAY") == false and env_nonempty("WAYLAND_DISPLAY") == false [
+        end none()
+    ]
+    let out = ""
+    match run_command("xrandr", ["--current"]) [
+        Ok(o) -> [
+            out = o
+        ]
+        Err(_e) -> [
+            end none()
+        ]
+    ]
+    let w = 0
+    let h = 0
+    let r = 0
+    let connector = ""
+    let cur_conn = ""
+    for raw_line in str_split(out, "\n") [
+        let line: Str = raw_line
+        if line.len() == 0 [
+            continue
+        ]
+        let first_c = line.char_at(0)
+        if first_c != " " and first_c != "\t" [
+            let parts = str_split(line, " ")
+            if parts.len() >= 2 and parts[1] == "connected" [
+                cur_conn = parts[0].clone()
+                let k = 2
+                while k < parts.len() [
+                    let p: Str = parts[k].clone()
+                    if str_contains(p.clone(), "x") and str_contains(p.clone(), "+") [
+                        match str_index_of(p.clone(), "+") [
+                            Some(pi) -> [
+                                let ml = parse_mode_line(p.slice(0, pi))
+                                if ml.w > 0 and ml.h > 0 and w == 0 [
+                                    w = ml.w
+                                    h = ml.h
+                                    connector = cur_conn.clone()
+                                ]
+                            ]
+                            None -> [
+                            ]
+                        ]
+                    ]
+                    k = k + 1
+                ]
+            ]
+            continue
+        ]
+        !! linia trybu: "   1920x1080     60.00*+"
+        let fields: List<Str> = []
+        for f in str_split(str_trim(line), " ") [
+            if f.len() > 0 [
+                fields.push(f)
+            ]
+        ]
+        if fields.len() == 0 [
+            continue
+        ]
+        if str_contains(fields[0].clone(), "x") [
+            let ml2 = parse_mode_line(fields[0].clone())
+            if ml2.w == 0 or ml2.h == 0 [
+                continue
+            ]
+            let fi = 1
+            while fi < fields.len() [
+                let f2: Str = fields[fi].clone()
+                if str_contains(f2.clone(), "*") [
+                    let num: Str = f2
+                    num = str_replace_chars(num)
+                    let rv = parse_int_or(num, 0)
+                    if w == 0 or ml2.w * ml2.h > w * h [
+                        w = ml2.w
+                        h = ml2.h
+                        r = rv
+                        connector = cur_conn.clone()
+                    ]
+                ]
+                fi = fi + 1
+            ]
+        ]
+    ]
+    if w == 0 or h == 0 [
+        end none()
+    ]
+    if r == 0 [
+        r = 60
+    ]
+    end some(DisplayInfo(w, h, r, connector, "xrandr"))
+]
+
+!! "60.00*+" -> "60" (obcina czesc ulamkowa i znaczniki).
+fun str_replace_chars(s: Str) -> Str [
+    let out: Str = ""
+    let i = 0
+    while i < s.len() [
+        let c = s.char_at(i)
+        if c == "." [
+            end out
+        ]
+        if c >= "0" and c <= "9" [
+            out = out + c
+        ]
+        i = i + 1
+    ]
+    end out
+]
+
+!! Liczba z linii JSON-a: `"hdisplay": 1920,`
+fun extract_json_int(line: Str) -> Int [
+    match str_index_of(line.clone(), ":") [
+        Some(i) -> [
+            let v: Str = str_trim(line.slice(i + 1, line.len()))
+            let digits: Str = ""
+            let k = 0
+            while k < v.len() [
+                let c = v.char_at(k)
+                if c >= "0" and c <= "9" [
+                    digits = digits + c
+                ] else [
+                    break
+                ]
+                k = k + 1
+            ]
+            end parse_int_or(digits, 0)
+        ]
+        None -> [
+            end 0
+        ]
+    ]
+]
+
+fun detect_via_drm_info() -> Option<DisplayInfo> [
+    match find_binary("drm_info") [
+        None -> [
+            end none()
+        ]
+        Some(bin) -> [
+            match run_command(bin, ["-j"]) [
+                Err(_e) -> [
+                    end none()
+                ]
+                Ok(out) -> [
+                    let w = 0
+                    let h = 0
+                    let r = 0
+                    for raw in str_split(out, "\n") [
+                        let line = str_trim(raw)
+                        if str_contains(line.clone(), "\"hdisplay\"") [
+                            let v = extract_json_int(line.clone())
+                            if v > 0 [
+                                w = v
+                            ]
+                        ]
+                        if str_contains(line.clone(), "\"vdisplay\"") [
+                            let v2 = extract_json_int(line.clone())
+                            if v2 > 0 [
+                                h = v2
+                            ]
+                        ]
+                        if str_contains(line.clone(), "\"vrefresh\"") [
+                            let v3 = extract_json_int(line.clone())
+                            if v3 > 0 [
+                                r = v3
+                            ]
+                        ]
+                        if w > 0 and h > 0 and r > 0 [
+                            break
+                        ]
+                    ]
+                    if w == 0 or h == 0 [
+                        end none()
+                    ]
+                    if r == 0 [
+                        r = 60
+                    ]
+                    end some(DisplayInfo(w, h, r, "", "drm_info"))
+                ]
+            ]
+        ]
+    ]
+]
+
+fun auto_detect_display() -> DisplayInfo [
+    match detect_via_drm() [
+        Some(d) -> [
+            end d
+        ]
+        None -> [
+        ]
+    ]
+    match detect_via_xrandr() [
+        Some(d2) -> [
+            end d2
+        ]
+        None -> [
+        ]
+    ]
+    match detect_via_drm_info() [
+        Some(d3) -> [
+            end d3
+        ]
+        None -> [
+        ]
+    ]
+    end display_fallback()
+]
+
+fun format_resolution(d: DisplayInfo) -> Str [
+    if d.width == 0 [
+        end "auto (DRM) @" + (d.refresh as Str) + "Hz [" + d.source + "]"
+    ]
+    let s: Str = (d.width as Str) + "x" + (d.height as Str) + "@" + (d.refresh as Str) + "Hz [" + d.source + "]"
+    if d.connector.len() > 0 [
+        s = s + " on " + d.connector
+    ]
+    end s
+]
