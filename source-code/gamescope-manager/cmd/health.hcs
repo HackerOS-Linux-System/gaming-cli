@@ -1,0 +1,193 @@
+get <std:string> import <str_trim>
+get <work:common::sys> import <geteuid::find_binary::process_running::service_active::env_nonempty::getuid>
+get <work:common::mode> import <state_dir::log_dir>
+
+struct HealthStatus [
+    name: Str,
+    ok: Bool,
+    message: Str,
+    fatal: Bool
+]
+
+struct HealthReport [
+    results: List<HealthStatus>,
+    can_start: Bool
+]
+
+fun hs(name: Str, fatal: Bool, ok: Bool, message: Str) -> HealthStatus [
+    end HealthStatus(name, ok, message, fatal)
+]
+
+fun steam_path() -> Option<Str> [
+    end find_binary("steam")
+]
+
+fun dir_count(path: Str) -> Int [
+    match list_dir(path) [
+        Ok(names) -> [
+            end names.len()
+        ]
+        Err(_e) -> [
+            end 0
+        ]
+    ]
+]
+
+fun hdr_in_drm() -> Bool [
+    match list_dir("/sys/class/drm") [
+        Ok(names) -> [
+            for n in names [
+                if path_exists("/sys/class/drm/" + n + "/hdr_output_metadata") [
+                    end true
+                ]
+            ]
+            end false
+        ]
+        Err(_e) -> [
+            end false
+        ]
+    ]
+]
+
+!! Zwraca liste wynikow i informacje, czy mozna startowac. `res_text` to opis
+!! rozdzielczosci wyliczony przez wolajacego (zeby nie zalezec od display.hcs).
+fun run_health_checks(auto_steam: Bool, mangoapp: Bool, hdr: Bool, width: Int, height: Int, refresh: Int, res_auto: Str, res_known: Bool) -> HealthReport [
+    let r: List<HealthStatus> = []
+
+    !! --- krytyczne (blokuja start) ---
+    match find_binary("gamescope") [
+        Some(_p) -> [
+            r.push(hs("gamescope zainstalowany", true, true, "OK"))
+        ]
+        None -> [
+            r.push(hs("gamescope zainstalowany", true, false, "gamescope nie znaleziony. Zainstaluj: sudo apt install gamescope"))
+        ]
+    ]
+    if geteuid() == 0 [
+        r.push(hs("uprawnienia roota", true, true, "OK"))
+    ] else [
+        r.push(hs("uprawnienia roota", true, false, "wymagane sudo"))
+    ]
+    let dri = dir_count("/dev/dri")
+    if dri > 0 [
+        r.push(hs("Vulkan / GPU driver", true, true, "/dev/dri: " + (dri as Str) + " urzadzen"))
+    ] else [
+        r.push(hs("Vulkan / GPU driver", true, false, "/dev/dri niedostepne — brak sterownikow GPU"))
+    ]
+    let dirs_ok = true
+    let dirs_msg = "OK"
+    let need: List<Str> = [state_dir(), log_dir()]
+    for d in need [
+        match create_dir(d.clone()) [
+            Ok(_v) -> [
+            ]
+            Err(e) -> [
+                dirs_ok = false
+                dirs_msg = "nie mozna utworzyc " + d + ": " + e
+            ]
+        ]
+    ]
+    r.push(hs("katalogi stanu", true, dirs_ok, dirs_msg))
+
+    !! --- ostrzezenia ---
+    if auto_steam [
+        match steam_path() [
+            Some(_s) -> [
+                r.push(hs("Steam zainstalowany", false, true, "OK"))
+            ]
+            None -> [
+                r.push(hs("Steam zainstalowany", false, false, "Steam nie znaleziony — sesja uruchomi sie bez Steam"))
+            ]
+        ]
+        if process_running("steam") [
+            r.push(hs("Steam nie dziala juz w tle", false, false, "Steam juz dziala — gamescope uruchomi nowa instancje Steam BPM"))
+        ] else [
+            r.push(hs("Steam nie dziala juz w tle", false, true, "OK"))
+        ]
+    ]
+
+    if process_running("pipewire") [
+        r.push(hs("PipeWire / audio", false, true, "PipeWire uruchomiony"))
+    ] elif process_running("pulseaudio") [
+        r.push(hs("PipeWire / audio", false, true, "PulseAudio uruchomiony"))
+    ] else [
+        r.push(hs("PipeWire / audio", false, false, "brak PipeWire ani PulseAudio — mozliwy brak dzwieku"))
+    ]
+
+    let bus = "/run/user/" + (getuid() as Str) + "/bus"
+    if env_nonempty("DBUS_SESSION_BUS_ADDRESS") [
+        r.push(hs("dbus sesji", false, true, "OK (z env)"))
+    ] elif path_exists(bus.clone()) [
+        r.push(hs("dbus sesji", false, true, "OK (" + bus + ")"))
+    ] else [
+        r.push(hs("dbus sesji", false, false, "brak sesji dbus — Steam moze nie dzialac poprawnie"))
+    ]
+
+    if mangoapp == false [
+        r.push(hs("MangoHUD", false, true, "wylaczony w konfiguracji"))
+    ] else [
+        let have = false
+        match find_binary("mangohud") [
+            Some(_m) -> [
+                have = true
+            ]
+            None -> [
+            ]
+        ]
+        match find_binary("mangoapp") [
+            Some(_m2) -> [
+                have = true
+            ]
+            None -> [
+            ]
+        ]
+        if have [
+            r.push(hs("MangoHUD", false, true, "OK"))
+        ] else [
+            r.push(hs("MangoHUD", false, false, "mangoapp/mangohud nie znalezione — overlay FPS niedostepny"))
+        ]
+    ]
+
+    if hdr == false [
+        r.push(hs("HDR - wsparcie kernela", false, true, "HDR wylaczony w konfiguracji"))
+    ] elif hdr_in_drm() [
+        r.push(hs("HDR - wsparcie kernela", false, true, "wsparcie HDR w DRM znalezione"))
+    ] else [
+        r.push(hs("HDR - wsparcie kernela", false, false, "brak wsparcia HDR w sterowniku DRM — HDR moze nie dzialac"))
+    ]
+
+    let pid = read_pid()
+    if is_running() [
+        r.push(hs("brak aktywnej sesji gamescope", false, false, "sesja juz dziala (PID: " + pid + ") — uzyj 'restart'"))
+    ] else [
+        r.push(hs("brak aktywnej sesji gamescope", false, true, "OK"))
+    ]
+
+    if path_exists("/dev/tty3") [
+        r.push(hs("tty3 dostepne", false, true, "OK"))
+    ] else [
+        r.push(hs("tty3 dostepne", false, false, "brak /dev/tty3"))
+    ]
+
+    if service_active("systemd-logind") [
+        r.push(hs("systemd-logind", false, true, "OK"))
+    ] else [
+        r.push(hs("systemd-logind", false, false, "systemd-logind nieaktywny — mozliwe problemy z sesja"))
+    ]
+
+    if width > 0 and height > 0 [
+        r.push(hs("rozdzielczosc", false, true, (width as Str) + "x" + (height as Str) + "@" + (refresh as Str) + "Hz (z konfiguracji)"))
+    ] elif res_known [
+        r.push(hs("rozdzielczosc", false, true, "auto: " + res_auto))
+    ] else [
+        r.push(hs("rozdzielczosc", false, false, "nie wykryto monitora — gamescope uzyje DRM auto-detekcji"))
+    ]
+
+    let can = true
+    for x in r.clone() [
+        if x.ok == false and x.fatal [
+            can = false
+        ]
+    ]
+    end HealthReport(r, can)
+]
