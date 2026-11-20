@@ -1,0 +1,304 @@
+get <std:string> import <str_trim::str_split::str_index_of>
+get <work:common::sys> import <find_binary::geteuid::parse_int_or::parse_bool::bool_str>
+
+!! kind: "bool" | "select" | "num" | "text" | "action"
+struct Field [
+    id: Str,
+    section: Str,
+    label: Str,
+    kind: Str,
+    hint: Str,
+    opts: List<Str>,
+    labels: List<Str>,
+    descs: List<Str>,
+    lo: Int,
+    hi: Int,
+    step: Int
+]
+
+fun no_strs() -> List<Str> [
+    let e: List<Str> = []
+    end e
+]
+
+fun f_bool(id: Str, section: Str, label: Str, hint: Str) -> Field [
+    end Field(id, section, label, "bool", hint, no_strs(), no_strs(), no_strs(), 0, 1, 1)
+]
+
+fun f_select(id: Str, section: Str, label: Str, opts: List<Str>, labels: List<Str>, descs: List<Str>) -> Field [
+    end Field(id, section, label, "select", "", opts, labels, descs, 0, 0, 1)
+]
+
+fun f_num(id: Str, section: Str, label: Str, lo: Int, hi: Int, step: Int, hint: Str) -> Field [
+    end Field(id, section, label, "num", hint, no_strs(), no_strs(), no_strs(), lo, hi, step)
+]
+
+fun f_text(id: Str, section: Str, label: Str, hint: Str) -> Field [
+    end Field(id, section, label, "text", hint, no_strs(), no_strs(), no_strs(), 0, 0, 0)
+]
+
+fun f_action(id: Str, label: Str) -> Field [
+    end Field(id, "akcje", label, "action", "", no_strs(), no_strs(), no_strs(), 0, 0, 0)
+]
+
+fun refresh_rates() -> List<Int> [
+    end [0, 30, 40, 48, 50, 60, 75, 90, 120, 144, 165, 240]
+]
+
+fun all_fields() -> List<Field> [
+    let languages: List<Str> = ["", "polish", "english", "german", "french", "spanish", "russian", "czech", "hungarian", "turkish"]
+    let language_labels: List<Str> = ["(systemowy)", "polish", "english", "german", "french", "spanish", "russian", "czech", "hungarian", "turkish"]
+    end [
+        f_bool("auto_res", "ROZDZIELCZOSC", "Auto-detekcja (DRM)", "0/0 = gamescope-manager wykryje natywna rozdzielczosc z DRM"),
+        f_num("width", "ROZDZIELCZOSC", "Szerokosc (px)", 640, 7680, 10, "< / > zmiana po 10px"),
+        f_num("height", "ROZDZIELCZOSC", "Wysokosc (px)", 480, 4320, 10, "< / > zmiana po 10px"),
+        f_num("refresh", "ROZDZIELCZOSC", "Czestotliwosc (Hz)", 0, 240, 0, "0=auto, dostepne: 30 40 48 60 75 90 120 144 165 240"),
+        f_select("scaling_mode", "SKALOWANIE", "Tryb skalowania", ["auto", "integer", "fit", "fill", "stretch"], ["auto", "integer", "fit", "fill", "stretch"], ["gamescope dobiera tryb automatycznie", "piksel-perfect (do retro/pixel-art)", "zachowaj proporcje (letterbox)", "wypelnij ekran (moze ucinac)", "rozciagnij (znieksztalca)"]),
+        f_select("scaling_filter", "SKALOWANIE", "Filtr", ["linear", "pixel", "fsr", "nis", "nearest"], ["linear", "pixel", "fsr", "nis", "nearest"], ["lekkie rozmycie, ogolny cel", "ostry, do gier pixel-art", "AMD FidelityFX Super Resolution", "NVIDIA/AMD/Intel Image Scaling", "brak filtrowania, najostrzejszy"]),
+        f_num("fsr_sharpness", "SKALOWANIE", "Ostrosc (0=max 20=min)", 0, 20, 1, "< / > zmiana wartosci"),
+        f_bool("vsync", "GAMESCOPE", "Adaptive sync / VRR", "FreeSync / G-Sync (wymaga monitora)"),
+        f_bool("hdr", "GAMESCOPE", "HDR", "wymaga kernela 6.4+, sterownika HDR i monitora HDR"),
+        f_bool("mangoapp", "GAMESCOPE", "MangoApp overlay", "FPS, GPU, CPU, temp — overlay na ekranie"),
+        f_bool("force_composite", "GAMESCOPE", "Force composite", "wymuszone kompozytowanie (wlacz jezeli czarny ekran)"),
+        f_bool("big_picture", "STEAM", "Big Picture / Deck UI", "-gamepadui -steamos3 (pelny interfejs TV)"),
+        f_bool("vr", "STEAM", "Tryb VR", "-vr — uruchamia SteamVR"),
+        f_bool("no_cef_sandbox", "STEAM", "Bez sandbox CEF", "szybszy start, mniej RAM (-no-cef-sandbox)"),
+        f_bool("tcp_mode", "STEAM", "TCP zamiast socket", "gdy masz problemy z polaczeniem (-nosharedmemory)"),
+        f_bool("no_verify", "STEAM", "Pomij weryfikacje", "szybszy start Steam (-noverifyfiles)"),
+        f_bool("full_desktop_res", "STEAM", "Pelna rozdzielczosc", "(-fulldesktopres)"),
+        f_bool("allow_hidcrypto", "STEAM", "HID Crypto", "szyfrowane kontrolery (-allow-hidcrypto)"),
+        f_bool("disable_hwa", "STEAM", "Bez GPU w UI", "wylacz GPU w interfejsie Steam (-disable-gpu)"),
+        f_select("beta_channel", "STEAM", "Kanal beta", ["", "beta", "steamdeckbeta", "beta-client"], ["brak", "beta", "steamdeckbeta", "beta-client"], no_strs()),
+        f_select("language", "STEAM", "Jezyk Steam", languages, language_labels, no_strs()),
+        f_text("steam_extra_flags", "STEAM", "Dodatkowe flagi Steam", "enter = edytuj, wpisz flagi Steam np. -silent -console"),
+        f_action("save", "Zapisz"),
+        f_action("cancel", "Anuluj"),
+        f_action("defaults", "Domyslne")
+    ]
+]
+
+fun settings_defaults() -> Dict<Str, Str> [
+    let d: Dict<Str, Str> = dict()
+    d.insert("auto_res", "true")
+    d.insert("width", "1920")
+    d.insert("height", "1080")
+    d.insert("refresh", "0")
+    d.insert("scaling_mode", "auto")
+    d.insert("scaling_filter", "linear")
+    d.insert("fsr_sharpness", "5")
+    d.insert("vsync", "true")
+    d.insert("hdr", "false")
+    d.insert("mangoapp", "true")
+    d.insert("force_composite", "false")
+    d.insert("big_picture", "true")
+    d.insert("vr", "false")
+    d.insert("no_cef_sandbox", "true")
+    d.insert("tcp_mode", "false")
+    d.insert("no_verify", "false")
+    d.insert("full_desktop_res", "false")
+    d.insert("allow_hidcrypto", "false")
+    d.insert("disable_hwa", "false")
+    d.insert("beta_channel", "")
+    d.insert("language", "")
+    d.insert("steam_extra_flags", "")
+    end d
+]
+
+fun sv(vals: Dict<Str, Str>, id: Str) -> Str [
+    match vals.fetch(id) [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end ""
+        ]
+    ]
+]
+
+fun with_val(vals: Dict<Str, Str>, id: Str, v: Str) -> Dict<Str, Str> [
+    let d: Dict<Str, Str> = vals.clone()
+    d.insert(id, v)
+    end d
+]
+
+!! Czy pole jest teraz widoczne (szerokosc/wysokosc tylko bez auto, ostrosc tylko dla fsr/nis).
+fun field_visible(f: Field, vals: Dict<Str, Str>) -> Bool [
+    if f.id == "width" or f.id == "height" [
+        end parse_bool(sv(vals, "auto_res")) == false
+    ]
+    if f.id == "fsr_sharpness" [
+        let sf = sv(vals, "scaling_filter")
+        end sf == "fsr" or sf == "nis"
+    ]
+    end true
+]
+
+fun visible_fields(vals: Dict<Str, Str>) -> List<Field> [
+    let out: List<Field> = []
+    for f in all_fields() [
+        if field_visible(f.clone(), vals) [
+            out.push(f)
+        ]
+    ]
+    end out
+]
+
+fun wrap_idx(v: Int, n: Int) -> Int [
+    if n <= 0 [
+        end 0
+    ]
+    end ((v % n) + n) % n
+]
+
+fun clamp_int(v: Int, lo: Int, hi: Int) -> Int [
+    if v < lo [
+        end lo
+    ]
+    if v > hi [
+        end hi
+    ]
+    end v
+]
+
+fun index_of_str(items: List<Str>, v: Str) -> Int [
+    let i = 0
+    while i < items.len() [
+        if items[i] == v [
+            end i
+        ]
+        i = i + 1
+    ]
+    end 0
+]
+
+fun step_through(vals: List<Int>, current: Int, delta: Int) -> Int [
+    let i = 0
+    while i < vals.len() [
+        if vals[i] == current [
+            end vals[clamp_int(i + delta, 0, vals.len() - 1)]
+        ]
+        i = i + 1
+    ]
+    if delta > 0 [
+        end vals[0]
+    ]
+    end vals[vals.len() - 1]
+]
+
+!! Zmiana wartosci pola o `delta` (-1/+1) - strzalki lewo/prawo, albo enter dla select/bool.
+fun adjust_field(f: Field, vals: Dict<Str, Str>, delta: Int) -> Dict<Str, Str> [
+    let cur = sv(vals, f.id.clone())
+    if f.kind == "bool" [
+        end with_val(vals, f.id.clone(), bool_str(parse_bool(cur) == false))
+    ]
+    if f.kind == "select" [
+        let idx = index_of_str(f.opts.clone(), cur)
+        end with_val(vals, f.id.clone(), f.opts[wrap_idx(idx + delta, f.opts.len())].clone())
+    ]
+    if f.kind == "num" [
+        let n = parse_int_or(cur, 0)
+        if f.id == "refresh" [
+            end with_val(vals, f.id.clone(), (step_through(refresh_rates(), n, delta) as Str))
+        ]
+        end with_val(vals, f.id.clone(), (clamp_int(n + delta * f.step, f.lo, f.hi) as Str))
+    ]
+    end vals.clone()
+]
+
+!! ---- wczytywanie / zapis przez gamescope-manager ----------------------------------------
+
+fun gm_path() -> Option<Str> [
+    end find_binary("gamescope-manager")
+]
+
+!! Uruchamia gamescope-manager (przez sudo, o ile nie jestesmy rootem) i zwraca stdout.
+fun run_gm(gm: Str, gm_args: List<Str>) -> Result<Str, Str> [
+    if geteuid() == 0 [
+        end run_command(gm, gm_args)
+    ]
+    let sudo_args: List<Str> = [gm]
+    for a in gm_args [
+        sudo_args.push(a)
+    ]
+    end run_command("sudo", sudo_args)
+]
+
+fun settings_load() -> Dict<Str, Str> [
+    let vals = settings_defaults()
+    match gm_path() [
+        None -> [
+            end vals
+        ]
+        Some(gm) -> [
+            match run_gm(gm, ["config", "dump"]) [
+                Err(_e) -> [
+                    end vals
+                ]
+                Ok(text) -> [
+                    for raw in str_split(text, "\n") [
+                        let line: Str = raw
+                        match str_index_of(line.clone(), "=") [
+                            Some(i) -> [
+                                let k = str_trim(line.slice(0, i))
+                                if vals.contains(k.clone()) [
+                                    vals = with_val(vals, k, line.slice(i + 1, line.len()))
+                                ]
+                            ]
+                            None -> [
+                            ]
+                        ]
+                    ]
+                    let w = parse_int_or(sv(vals, "width"), 0)
+                    let h = parse_int_or(sv(vals, "height"), 0)
+                    if w == 0 and h == 0 [
+                        vals = with_val(vals, "auto_res", "true")
+                        vals = with_val(vals, "width", "1920")
+                        vals = with_val(vals, "height", "1080")
+                    ] else [
+                        vals = with_val(vals, "auto_res", "false")
+                    ]
+                    end vals
+                ]
+            ]
+        ]
+    ]
+]
+
+fun pair(k: Str, v: Str) -> Str [
+    end k + "=" + v
+]
+
+!! Zapis wszystkich ustawien JEDNYM wywolaniem `config apply` (jedno sudo).
+fun settings_save(vals: Dict<Str, Str>) -> Result<Bool, Str> [
+    let gm = ""
+    match gm_path() [
+        Some(p) -> [
+            gm = p
+        ]
+        None -> [
+            end err("gamescope-manager nie znaleziony")
+        ]
+    ]
+    let a: List<Str> = ["config", "apply"]
+    if parse_bool(sv(vals, "auto_res")) [
+        a.push(pair("width", "0"))
+        a.push(pair("height", "0"))
+    ] else [
+        a.push(pair("width", sv(vals, "width")))
+        a.push(pair("height", sv(vals, "height")))
+    ]
+    let keys: List<Str> = ["refresh", "vsync", "hdr", "mangoapp", "force_composite", "scaling_mode", "scaling_filter", "fsr_sharpness", "big_picture", "vr", "no_cef_sandbox", "tcp_mode", "no_verify", "full_desktop_res", "allow_hidcrypto", "disable_hwa", "beta_channel", "language", "steam_extra_flags"]
+    for k in keys [
+        a.push(pair(k.clone(), sv(vals, k.clone())))
+    ]
+    !! jedno pokretlo ostrosci steruje FSR i NIS
+    a.push(pair("nis_sharpness", sv(vals, "fsr_sharpness")))
+    match run_gm(gm, a) [
+        Ok(_o) -> [
+            end ok(true)
+        ]
+        Err(e) -> [
+            end err("Blad zapisu ustawien: " + e)
+        ]
+    ]
+]
