@@ -1,0 +1,74 @@
+get <std:term> import <term_use_color>
+
+!!! Paleta HackerOS Gaming Edition (true-color ANSI). Kolory jako funkcje, nie
+!!! `const` - `const` na najwyzszym poziomie musi byc literalem, a tu chcemy
+!!! jedno miejsce zmiany palety.
+
+fun esc_fg(r: Int, g: Int, b: Int) -> Str [
+    end "\e[38;2;" + (r as Str) + ";" + (g as Str) + ";" + (b as Str) + "m"
+]
+
+fun esc_bg(r: Int, g: Int, b: Int) -> Str [
+    end "\e[48;2;" + (r as Str) + ";" + (g as Str) + ";" + (b as Str) + "m"
+]
+
+fun paint(text: Str, codes: Str) -> Str [
+    if term_use_color() [
+        end codes + text + "\e[0m"
+    ]
+    end text
+]
+
+fun primary(t: Str) -> Str [ end paint(t, "\e[1m" + esc_fg(124, 58, 237)) ]
+fun secondary(t: Str) -> Str [ end paint(t, esc_fg(168, 85, 247)) ]
+fun accent(t: Str) -> Str [ end paint(t, "\e[1m" + esc_fg(34, 211, 238)) ]
+fun accent_faint(t: Str) -> Str [ end paint(t, "\e[2m" + esc_fg(34, 211, 238)) ]
+fun green(t: Str) -> Str [ end paint(t, "\e[1m" + esc_fg(34, 197, 94)) ]
+fun red(t: Str) -> Str [ end paint(t, "\e[1m" + esc_fg(239, 68, 68)) ]
+fun yellow(t: Str) -> Str [ end paint(t, "\e[1m" + esc_fg(245, 158, 11)) ]
+fun gray(t: Str) -> Str [ end paint(t, esc_fg(107, 114, 128)) ]
+fun white(t: Str) -> Str [ end paint(t, esc_fg(249, 250, 251)) ]
+fun white_b(t: Str) -> Str [ end paint(t, "\e[1m" + esc_fg(249, 250, 251)) ]
+fun dim(t: Str) -> Str [ end paint(t, esc_fg(75, 85, 99)) ]
+fun green_n(t: Str) -> Str [ end paint(t, esc_fg(34, 197, 94)) ]
+fun yellow_n(t: Str) -> Str [ end paint(t, esc_fg(245, 158, 11)) ]
+fun selected(t: Str) -> Str [ end paint(t, "\e[1m" + esc_bg(30, 27, 75) + esc_fg(249, 250, 251)) ]
+fun selected_sub(t: Str) -> Str [ end paint(t, esc_bg(30, 27, 75) + esc_fg(168, 85, 247)) ]
+
+!!! Liczba widocznych znakow (nie bajtow) - polskie litery i emoji nie
+!!! rozjezdzaja kolumn.
+fun visible_len(s: Str) -> Int [
+    let n = 0
+    native {Rust} [
+        n = s.chars().count() as i64;
+    ]
+    end n
+]
+
+fun pad_right(s: Str, width: Int) -> Str [
+    let n = visible_len(s.clone())
+    if n >= width [
+        end s
+    ]
+    let out = s
+    let i = n
+    while i < width [
+        out = out + " "
+        i = i + 1
+    ]
+    end out
+]
+
+fun repeat_str(s: Str, n: Int) -> Str [
+    let out = ""
+    let i = 0
+    while i < n [
+        out = out + s.clone()
+        i = i + 1
+    ]
+    end out
+]
+
+fun divider(width: Int) -> Str [
+    end dim(repeat_str("─", width))
+]
