@@ -8,7 +8,7 @@
 -> using       => 0.6
 
 [workspace]
--> members => [common, gamescope-manager, gaming-cli, gaming, libs/core, libs/std]
+-> members => [source-code/common, source-code/gamescope-manager, source-code/gaming-cli, source-code/gaming]
 
 [build]
 -> link => static
