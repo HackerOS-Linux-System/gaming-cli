@@ -1,0 +1,20 @@
+[package]
+-> name        => common
+-> version     => 0.3.0
+-> description => Wspolna biblioteka: styl ANSI, system/procesy, rozpoznanie dystrybucji, tryb gry/pulpitu, UI.
+-> authors     => ["HackerOS Team <hackeros068@gmail.com>"]
+-> license     => GPL-3.0
+-> lang        => HackerScript
+-> using       => 0.6
+
+[layout]
+-> lib => lib
+
+[lib]
+-> output => hlib
+
+[build]
+-> link => static
+
+[default-build]
+-> profile => release
