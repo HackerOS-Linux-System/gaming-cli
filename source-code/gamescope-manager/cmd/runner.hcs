@@ -1,0 +1,575 @@
+get <crates:libc::0.2>
+get <std:string> import <str_trim::str_join::str_split>
+get <work:common::sys> import <geteuid::getuid::getpid::sleep_secs::sleep_ms::pid_alive::send_signal::sig_term::sig_kill::find_binary::process_running::env_nonempty::env_or::bool_str::chvt>
+
+fun max_crash_count() -> Int [ end 5 ]
+!! Sesja krotsza niz tyle sekund liczy sie jako crash.
+fun short_session_secs() -> Int [ end 60 ]
+
+!! ---- natywny spawn z przekazywaniem sygnalow -----------------------------------
+
+native {Rust} [
+    use std::sync::atomic::{AtomicI32, Ordering};
+
+    static HKS_CHILD: AtomicI32 = AtomicI32::new(0);
+    static HKS_FWD: AtomicI32 = AtomicI32::new(0);
+
+    extern "C" fn hks_forward_signal(sig: libc::c_int) {
+        HKS_FWD.store(sig, Ordering::SeqCst);
+        let pid = HKS_CHILD.load(Ordering::SeqCst);
+        if pid > 0 {
+            unsafe { libc::kill(pid, libc::SIGTERM); }
+        }
+    }
+]
+
+!! Wynik jednej sesji.
+struct SessionResult [
+    spawned: Bool,
+    code: Int,
+    forwarded: Bool,
+    pid: Int,
+    error: Str
+]
+
+!! Startuje `path` z `argv` (stdin/stdout/stderr dziedziczone), dopisuje do
+!! srodowiska ZMIENNE "K=V" z `env_adds` tylko gdy ich jeszcze nie ma (jak
+!! `appendMissing`), zapisuje PID do `pid_path`, przekazuje SIGINT/SIGTERM/SIGHUP
+!! do dziecka i czeka na koniec. `code` = kod wyjscia (128+sygnal przy zabiciu).
+fun spawn_session(path: Str, argv: List<Str>, env_adds: List<Str>, pid_path: Str) -> SessionResult [
+    let spawned = false
+    let code = 0
+    let forwarded = false
+    let pid = 0
+    let why = ""
+    native {Rust} [
+        use std::os::unix::process::ExitStatusExt;
+        let mut cmd = std::process::Command::new(&path);
+        cmd.args(argv.iter());
+        for kv in env_adds.iter() {
+            if let Some((k, v)) = kv.split_once('=') {
+                if std::env::var_os(k).is_none() {
+                    cmd.env(k, v);
+                }
+            }
+        }
+        cmd.stdin(std::process::Stdio::inherit());
+        cmd.stdout(std::process::Stdio::inherit());
+        cmd.stderr(std::process::Stdio::inherit());
+        HKS_FWD.store(0, Ordering::SeqCst);
+        match cmd.spawn() {
+            Ok(mut child) => {
+                spawned = true;
+                pid = child.id() as i64;
+                HKS_CHILD.store(child.id() as i32, Ordering::SeqCst);
+                if let Some(parent) = std::path::Path::new(&pid_path).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let _ = std::fs::write(&pid_path, format!("{}\n", pid));
+                unsafe {
+                    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+                        libc::signal(sig, hks_forward_signal as usize as libc::sighandler_t);
+                    }
+                }
+                match child.wait() {
+                    Ok(st) => {
+                        if let Some(sig) = st.signal() {
+                            code = 128 + sig as i64;
+                        } else {
+                            code = st.code().unwrap_or(-1) as i64;
+                        }
+                    }
+                    Err(e) => {
+                        code = -1;
+                        why = format!("{}", e);
+                    }
+                }
+                HKS_CHILD.store(0, Ordering::SeqCst);
+                forwarded = HKS_FWD.load(Ordering::SeqCst) != 0;
+            }
+            Err(e) => {
+                why = format!("{}", e);
+            }
+        }
+    ]
+    end SessionResult(spawned, code, forwarded, pid, why)
+]
+
+!! ---- sciezki i pomocnicy ------------------------------------------------------------
+
+fun runtime_dir() -> Str [
+    end "/run/user/" + (getuid() as Str)
+]
+
+fun gamescope_socket() -> Str [
+    end runtime_dir() + "/gamescope-0"
+]
+
+fun gamescope_stats() -> Str [
+    end "/tmp/gamescope-stats-" + (getpid() as Str)
+]
+
+fun steam_dir() -> Str [
+    let home = env_or("HOME", "")
+    let cands: List<Str> = [home + "/.local/share/Steam", "/usr/share/steam", "/opt/steam"]
+    for p in cands [
+        if path_exists(p.clone()) [
+            end p
+        ]
+    ]
+    end home + "/.local/share/Steam"
+]
+
+fun steam_compat_path() -> Str [
+    end env_or("HOME", "") + "/.local/share/Steam/steamapps/compatdata"
+]
+
+fun bool01(b: Bool) -> Str [
+    if b [
+        end "1"
+    ]
+    end "0"
+]
+
+fun proc_status(name: Str) -> Str [
+    if process_running(name) [
+        end "uruchomiony"
+    ]
+    end "nie uruchomiony"
+]
+
+!! ---- budowanie argumentow ------------------------------------------------------------
+
+!! Parametry rozstrzygniete w momencie startu (po auto-detekcji monitora).
+struct RunParams [
+    width: Int,
+    height: Int,
+    refresh: Int,
+    connector: Str,
+    steam: Bool
+]
+
+fun build_args(cfg: Config, rp: RunParams) -> List<Str> [
+    let a: List<Str> = []
+
+    !! W trybie embedded (-e) gamescope przejmuje KMS/DRM bezposrednio. Poza nim
+    !! (wewnatrz Wayland/X11) gamescope sam wybiera backend - zadnej flagi nie trzeba.
+    if env_nonempty("WAYLAND_DISPLAY") == false and env_nonempty("DISPLAY") == false [
+        a.push("-e")
+    ]
+
+    !! Rozdzielczosc: -W/-H = wyjscie, -w/-h = wewnetrzna (gra). Przy 0 gamescope
+    !! sam wykrywa z DRM.
+    if rp.width > 0 and rp.height > 0 [
+        a.push("-W")
+        a.push((rp.width as Str))
+        a.push("-H")
+        a.push((rp.height as Str))
+        let iw = cfg_num(cfg, "internal_width")
+        let ih = cfg_num(cfg, "internal_height")
+        if iw > 0 and ih > 0 [
+            a.push("-w")
+            a.push((iw as Str))
+            a.push("-h")
+            a.push((ih as Str))
+        ] else [
+            a.push("-w")
+            a.push((rp.width as Str))
+            a.push("-h")
+            a.push((rp.height as Str))
+        ]
+    ]
+    if rp.refresh > 0 [
+        a.push("-r")
+        a.push((rp.refresh as Str))
+    ]
+    if cfg_flag(cfg, "fullscreen") [
+        a.push("-f")
+    ]
+    if cfg_flag(cfg, "vsync") [
+        a.push("--adaptive-sync")
+    ]
+    if cfg_flag(cfg, "hdr") [
+        a.push("--hdr-enabled")
+    ]
+    if cfg_flag(cfg, "mangoapp") [
+        a.push("--mangoapp")
+    ]
+    if cfg_flag(cfg, "force_composite") [
+        a.push("--force-composition")
+    ]
+
+    !! Skalowanie (rozszerzenie wzgledem wersji w Go, ktora te klucze ignorowala).
+    let mode = cfg_text(cfg, "scaling_mode")
+    if mode.len() > 0 and mode != "auto" [
+        a.push("-S")
+        a.push(mode)
+    ]
+    let filt = cfg_text(cfg, "scaling_filter")
+    if filt.len() > 0 and filt != "linear" [
+        a.push("-F")
+        a.push(filt.clone())
+        if filt == "fsr" [
+            a.push("--sharpness")
+            a.push((cfg_num(cfg, "fsr_sharpness") as Str))
+        ] elif filt == "nis" [
+            a.push("--sharpness")
+            a.push((cfg_num(cfg, "nis_sharpness") as Str))
+        ]
+    ]
+    let crr = cfg_text(cfg, "custom_refresh_rates")
+    if crr.len() > 0 [
+        a.push("--custom-refresh-rates")
+        a.push(crr)
+    ]
+
+    !! Preferowane zlacze: jawne z konfiguracji, w przeciwnym razie wykryte.
+    let oc = cfg_text(cfg, "output_connector")
+    if oc.len() > 0 [
+        a.push("--prefer-output")
+        a.push(oc)
+    ] elif rp.connector.len() > 0 [
+        a.push("--prefer-output")
+        a.push(rp.connector.clone())
+    ]
+
+    !! Gniazdo Wayland gamescope (komunikacja Steam <-> gamescope) i statystyki.
+    a.push("-R")
+    a.push(gamescope_socket())
+    a.push("-T")
+    a.push(gamescope_stats())
+
+    !! --steam: sesja Steam (specjalne sciezki kodu w gamescope).
+    if rp.steam [
+        a.push("--steam")
+    ]
+    a.push("--xwayland-count")
+    a.push("2")
+    a.push("--hide-cursor-delay")
+    a.push("3000")
+    a.push("--fade-out-duration")
+    a.push("200")
+
+    for f in cfg_extra_flags(cfg) [
+        a.push(f)
+    ]
+    end a
+]
+
+fun build_steam_args(cfg: Config) -> List<Str> [
+    let a: List<Str> = []
+    a.push("-steamos3")
+    a.push("-pipewire-dmabuf")
+    if cfg_st_flag(cfg, "big_picture") [
+        a.push("-gamepadui")
+    ]
+    if cfg_st_flag(cfg, "vr") [
+        a.push("-vr")
+    ]
+    if cfg_st_flag(cfg, "no_cef_sandbox") [
+        a.push("-no-cef-sandbox")
+    ]
+    if cfg_st_flag(cfg, "tcp_mode") [
+        a.push("-nosharedmemory")
+    ]
+    if cfg_st_flag(cfg, "no_verify") [
+        a.push("-noverifyfiles")
+    ]
+    if cfg_st_flag(cfg, "full_desktop_res") [
+        a.push("-fulldesktopres")
+    ]
+    if cfg_st_flag(cfg, "allow_hidcrypto") [
+        a.push("-allow-hidcrypto")
+    ]
+    if cfg_st_flag(cfg, "disable_hwa") [
+        a.push("-disable-gpu")
+    ]
+    let beta = cfg_st_text(cfg, "beta_channel")
+    if beta == "beta" or beta == "steamdeckbeta" or beta == "beta-client" [
+        a.push("-beta")
+        a.push(beta)
+    ]
+    let lang = cfg_st_text(cfg, "language")
+    if lang.len() > 0 [
+        a.push("-lang")
+        a.push(lang)
+    ]
+    for f in str_split(cfg_st_text(cfg, "extra_flags"), " ") [
+        if f.len() > 0 [
+            a.push(f)
+        ]
+    ]
+    end a
+]
+
+!! Zmienne srodowiska sesji (jak gamescope-session-steam / SteamOS / Bazzite).
+!! Zwraca liste "K=V"; spawn_session dopisuje tylko te, ktorych jeszcze nie ma.
+fun build_env(cfg: Config) -> List<Str> [
+    let e: List<Str> = []
+    let rd = runtime_dir()
+    let sock = gamescope_socket()
+    e.push("XDG_SESSION_TYPE=wayland")
+    e.push("XDG_CURRENT_DESKTOP=gamescope")
+    e.push("XDG_SESSION_CLASS=user")
+    e.push("XDG_SESSION_DESKTOP=gamescope")
+    e.push("XDG_RUNTIME_DIR=" + rd.clone())
+    e.push("GAMESCOPE_WAYLAND_DISPLAY=" + sock.clone())
+    e.push("WAYLAND_DISPLAY=" + sock)
+    e.push("STEAM_USE_DYNAMIC_VRS=1")
+    e.push("STEAM_GAMESCOPE_COLOR_MANAGED=1")
+    e.push("STEAM_GAMESCOPE_TEARING_SUPPORTED=1")
+    e.push("STEAM_GAMESCOPE_COMPOSITE_DEBUG=0")
+    e.push("STEAM_GAMESCOPE_FANCY_SCALING_SUPPORT=1")
+    e.push("STEAM_GAMESCOPE_DYNAMIC_FPSLIMIT=1")
+    e.push("STEAM_GAMESCOPE_NIS_SUPPORTED=1")
+    e.push("STEAM_GAMESCOPE_FRAMEOUT_INHIBIT_SUPPORT=1")
+    e.push("STEAM_GAMESCOPE_PIPELINE_CACHE=1")
+    e.push("STEAM_GAMESCOPE_VRMODE_SUPPORT=" + bool01(cfg_st_flag(cfg, "vr")))
+    e.push("STEAM_GAMESCOPE_HDR_SUPPORTED=" + bool01(cfg_flag(cfg, "hdr")))
+    e.push("STEAM_GAMESCOPE_VRR_SUPPORTED=" + bool01(cfg_flag(cfg, "vsync")))
+    e.push("DBUS_SESSION_BUS_ADDRESS=unix:path=" + rd + "/bus")
+    e.push("MESA_VK_WSI_PRESENT_MODE=mailbox")
+    e.push("STEAM_COMPAT_CLIENT_INSTALL_PATH=" + steam_dir())
+    e.push("STEAM_COMPAT_DATA_PATH=" + steam_compat_path())
+    e.push("PROTON_LOG=0")
+    if cfg_flag(cfg, "hdr") [
+        e.push("DXVK_HDR=1")
+    ]
+    if cfg_flag(cfg, "mangoapp") [
+        e.push("MANGOHUD=1")
+    ]
+    end e
+]
+
+!! ---- start / recovery / stop -----------------------------------------------------------
+
+fun check_root() -> Result<Bool, Str> [
+    if geteuid() != 0 [
+        end err("gamescope-manager wymaga uprawnien roota\nUzyj: sudo gamescope-manager")
+    ]
+    end ok(true)
+]
+
+fun report_health(rep: HealthReport) [
+    for r in rep.results.clone() [
+        if r.ok == false [
+            if r.fatal [
+                elog("[!!] " + r.name + ": " + r.message)
+            ] else [
+                elog("[??] " + r.name + ": " + r.message)
+            ]
+        ]
+    ]
+]
+
+!! Rozdzielczosc do uzycia: zadana w konfiguracji albo wykryta.
+fun resolve_params(cfg: Config) -> RunParams [
+    let w = cfg_num(cfg, "width")
+    let h = cfg_num(cfg, "height")
+    if w > 0 and h > 0 [
+        end RunParams(w, h, cfg_num(cfg, "refresh"), "", cfg_flag(cfg, "auto_steam"))
+    ]
+    let d = auto_detect_display()
+    end RunParams(d.width, d.height, d.refresh, d.connector, cfg_flag(cfg, "auto_steam"))
+]
+
+fun health_for(cfg: Config) -> HealthReport [
+    let w = cfg_num(cfg, "width")
+    let h = cfg_num(cfg, "height")
+    let known = false
+    let desc = ""
+    if w == 0 or h == 0 [
+        let d = auto_detect_display()
+        known = d.source != "fallback"
+        desc = format_resolution(d)
+    ]
+    end run_health_checks(cfg_flag(cfg, "auto_steam"), cfg_flag(cfg, "mangoapp"), cfg_flag(cfg, "hdr"), w, h, cfg_num(cfg, "refresh"), desc, known)
+]
+
+!! Uruchamia sesje i czeka na jej koniec. Ok = normalne zakonczenie
+!! (albo zatrzymanie na zadanie), Err = nie wystartowala / padla.
+fun session_start(cfg: Config) -> Result<Bool, Str> [
+    check_root()?
+    let rep = health_for(cfg.clone())
+    report_health(rep.clone())
+    if rep.can_start == false [
+        end err("preflight checks nie powiodly sie — nie uruchamiam sesji")
+    ]
+    let gs = ""
+    match find_binary("gamescope") [
+        Some(p) -> [
+            gs = p
+        ]
+        None -> [
+            end err("gamescope nie jest zainstalowany\nZainstaluj: sudo apt install gamescope")
+        ]
+    ]
+    if is_running() [
+        end err("sesja gamescope juz dziala (PID: " + read_pid() + ")\nUzyj 'restart' aby zrestartowac")
+    ]
+    clear_stop_requested()
+
+    let rp = resolve_params(cfg.clone())
+    let shown = DisplayInfo(rp.width, rp.height, rp.refresh, rp.connector.clone(), "config/auto")
+    log("[gamescope-manager] Rozdzielczosc: " + format_resolution(shown))
+    log_entry("DISPLAY: " + format_resolution(shown))
+
+    let argv = build_args(cfg.clone(), rp.clone())
+    if rp.steam [
+        match find_binary("steam") [
+            Some(sp) -> [
+                argv.push("--")
+                argv.push(sp)
+                for sa in build_steam_args(cfg.clone()) [
+                    argv.push(sa)
+                ]
+            ]
+            None -> [
+                elog("[gamescope-manager] Ostrzezenie: Steam nie znaleziony — uruchamiam bez Steam")
+            ]
+        ]
+    ]
+    log_entry("START: " + gs.clone() + " " + str_join(argv.clone(), " "))
+    log("[gamescope-manager] Uruchamiam: gamescope " + str_join(argv.clone(), " "))
+
+    let t0 = now_ms()
+    let res = spawn_session(gs, argv, build_env(cfg), pid_file())
+    if res.spawned == false [
+        end err("nie mozna uruchomic gamescope: " + res.error)
+    ]
+    log("[gamescope-manager] Proces gamescope (PID: " + (res.pid as Str) + ") zakonczony.")
+    log_entry("PID=" + (res.pid as Str))
+    remove_pid()
+
+    let secs = (now_ms() - t0) / 1000
+    let user_stop = res.forwarded or stop_requested()
+    if res.code == 0 or user_stop [
+        log_entry("Sesja zakonczona normalnie po " + (secs as Str) + "s")
+        log("[gamescope-manager] Sesja gamescope zakonczona.")
+        reset_crash_tracker()
+        end ok(true)
+    ]
+    log_entry("Sesja zakonczona z bledem po " + (secs as Str) + "s: kod " + (res.code as Str))
+    log("[gamescope-manager] Sesja zakonczona po " + (secs as Str) + "s: kod wyjscia " + (res.code as Str))
+    if secs < short_session_secs() [
+        track_crash()
+    ] else [
+        reset_crash_tracker()
+    ]
+    end err("gamescope zakonczyl sie kodem " + (res.code as Str))
+]
+
+!! Start z automatycznym restartem po crashu (hackeros-game-mode.service).
+!! Po max_crash_count crashach z rzedu wraca na tty2 (KDE).
+fun session_start_with_recovery(cfg: Config) -> Result<Bool, Str> [
+    clear_stop_requested()
+    while true [
+        let count = read_crash_count()
+        if count >= max_crash_count() [
+            reset_crash_tracker()
+            log_entry("CRASH LOOP: " + (count as Str) + " crashow — powrot do pulpitu")
+            elog("[gamescope-manager] Za duzo crashow (" + (count as Str) + ") — powrot do pulpitu")
+            let _c = chvt("2")
+            end err("sesja crashowala " + (count as Str) + " razy z rzedu")
+        ]
+        match session_start(cfg.clone()) [
+            Ok(_v) -> [
+                end ok(true)
+            ]
+            Err(e) -> [
+                if stop_requested() [
+                    end ok(true)
+                ]
+                let c2 = read_crash_count()
+                elog("[gamescope-manager] " + e)
+                log("[gamescope-manager] Crash #" + (c2 as Str) + ". Restart za 3 sekundy...")
+                log_entry("RESTART po crashu #" + (c2 as Str))
+                sleep_secs(3)
+                if stop_requested() [
+                    end ok(true)
+                ]
+            ]
+        ]
+    ]
+    end ok(true)
+]
+
+!! Zatrzymuje sesje: SIGTERM, po 20s SIGKILL, po 30s koniec.
+fun session_stop() -> Result<Bool, Str> [
+    check_root()?
+    if is_running() == false [
+        log("[gamescope-manager] Brak aktywnej sesji.")
+        mark_stop_requested()
+        end ok(true)
+    ]
+    let pid = get_pid_int()
+    if pid <= 0 [
+        end err("nie mozna odczytac PID sesji")
+    ]
+    mark_stop_requested()
+    log("[gamescope-manager] Zatrzymuje sesje (PID: " + (pid as Str) + ")...")
+    log_entry("STOP: PID=" + (pid as Str))
+    if send_signal(pid, sig_term()) == false [
+        let _k = send_signal(pid, sig_kill())
+        remove_pid()
+        end ok(true)
+    ]
+    let waited = 0
+    let killed = false
+    while true [
+        sleep_secs(1)
+        waited = waited + 1
+        if is_running() == false [
+            break
+        ]
+        if waited >= 30 [
+            log("[gamescope-manager] Hard timeout — wymuszam zatrzymanie.")
+            let _k2 = send_signal(pid, sig_kill())
+            break
+        ]
+        if waited >= 20 and killed == false [
+            log("[gamescope-manager] Proces nie odpowiada (" + (waited as Str) + "s), wysylam SIGKILL...")
+            let _k3 = send_signal(pid, sig_kill())
+            killed = true
+        ]
+    ]
+    remove_pid()
+    log_entry("Sesja zatrzymana")
+    log("[gamescope-manager] Sesja zatrzymana.")
+    end ok(true)
+]
+
+fun session_status() [
+    log("[gamescope-manager] Status sesji:")
+    log("")
+    if is_running() [
+        log("  Status        : AKTYWNA")
+        log("  PID           : " + read_pid())
+        log("  Gamescope     : " + proc_status("gamescope"))
+        log("  Steam         : " + proc_status("steam"))
+        log("  MangoApp      : " + proc_status("mangoapp"))
+        log("  Crashe        : " + (read_crash_count() as Str) + " / " + (max_crash_count() as Str))
+    ] else [
+        log("  Status        : NIEAKTYWNA")
+    ]
+    log("")
+    let cfg = config_load()
+    let rp = resolve_params(cfg.clone())
+    log("  Konfiguracja  : " + config_file())
+    if rp.width == 0 [
+        log("  Rozdzielczosc : auto (DRM) @" + (rp.refresh as Str) + "Hz")
+    ] else [
+        log("  Rozdzielczosc : " + (rp.width as Str) + "x" + (rp.height as Str) + "@" + (rp.refresh as Str) + "Hz")
+    ]
+    log("  Fullscreen    : " + bool_str(cfg_flag(cfg, "fullscreen")))
+    log("  VSync         : " + bool_str(cfg_flag(cfg, "vsync")))
+    log("  HDR           : " + bool_str(cfg_flag(cfg, "hdr")))
+    log("  MangoApp      : " + bool_str(cfg_flag(cfg, "mangoapp")))
+    log("  Auto Steam    : " + bool_str(cfg_flag(cfg, "auto_steam")))
+    log("  Big Picture   : " + bool_str(cfg_st_flag(cfg, "big_picture")))
+    let extra = cfg_extra_flags(cfg)
+    if extra.len() > 0 [
+        log("  Extra flags   : " + str_join(extra, " "))
+    ]
+    log("")
+]
