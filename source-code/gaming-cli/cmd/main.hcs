@@ -1,0 +1,205 @@
+using <0.6>
+
+!! gaming-cli - przelaczanie trybow gry/pulpitu, info, TUI dla HackerOS Gaming
+!! Edition (Debian Testing / Forky, PC i laptopy). Przepisane z Go na HackerScript.
+
+get <std:string> import <str_contains>
+get <work:common::sys> import <find_binary>
+get <work:common::distro> import <check_distro>
+get <work:common::mode> import <current_mode>
+get <work:common::style> import <accent::gray::dim::white::white_b::green::red::yellow::pad_right::divider::paint>
+get <work:common::ui> import <banner::ok_msg::err_msg::warn_msg::mode_badge::section::cmd_row>
+
+include <info>
+include <switch>
+include <settings>
+include <tui>
+
+fun version() -> Str [ end "0.3.0" ]
+
+fun print_banner() [
+    banner("gaming-cli", "v" + version() + "  ·  Debian Testing (Forky)  ·  PC / Laptop")
+]
+
+fun print_help() [
+    print_banner()
+    section("UŻYCIE")
+    log("  " + accent("gaming-cli") + " " + gray("[komenda] [argumenty]"))
+    log("")
+    section("TRYB INTERAKTYWNY")
+    cmd_row("gaming-cli", "Otwórz TUI (bez argumentów)", 24)
+    cmd_row("gaming-cli tui", "Otwórz TUI jawnie", 24)
+    log("")
+    section("KOMENDY")
+    let cmds: List<List<Str>> = [
+        ["switch game-mode", "Przełącz na tryb gry (Gamescope + Steam BPM)"],
+        ["switch desktop-mode", "Przełącz z powrotem na KDE Plasma"],
+        ["status", "Pokaż aktywny tryb"],
+        ["info", "Informacje o środowisku gaming"],
+        ["gamescope [args]", "Uruchom gamescope z podanymi argumentami"],
+        ["version", "Pokaż wersję"],
+        ["help", "Pokaż tę pomoc"]
+    ]
+    for c in cmds [
+        cmd_row(c[0].clone(), c[1].clone(), 24)
+    ]
+    log("")
+    log("  " + divider(60))
+    log("  " + gray("Przeznaczony wyłącznie dla HackerOS Gaming Edition (Debian Testing/Forky)."))
+    log("  " + gray("Obsługuje tylko PC i laptopy — handheldowe urządzenia nie są wspierane."))
+    log("")
+]
+
+fun print_status() [
+    match current_mode() [
+        Err(e) -> [
+            err_msg(e)
+            exit(1)
+        ]
+        Ok(mode) -> [
+            print_banner()
+            log(gray("  Aktywny tryb : ") + mode_badge(mode))
+            log("")
+        ]
+    ]
+]
+
+!! Kolor wartosci wiersza info (jak w wersji Go).
+fun style_info_value(v: Str) -> Str [
+    if str_contains(v.clone(), "NIE ZAINSTALOWANY") [
+        end red(v)
+    ]
+    if str_contains(v.clone(), "game-mode") [
+        end green("🎮 " + v)
+    ]
+    if str_contains(v.clone(), "desktop-mode") [
+        end white("🖥  " + v)
+    ]
+    if str_contains(v.clone(), "zainstalowany") [
+        end green(v)
+    ]
+    end white(v)
+]
+
+fun print_info() [
+    print_banner()
+    let info = gather_info()
+    log(accent("  📊 Środowisko gaming"))
+    log("  " + divider(56))
+    for r in info_rows(info) [
+        log("  " + gray(pad_right(r[0].clone(), 14)) + dim(" : ") + style_info_value(r[1].clone()))
+    ]
+    log("")
+]
+
+fun require_distro() [
+    match check_distro("gaming-cli") [
+        Ok(_v) -> [
+        ]
+        Err(e) -> [
+            err_msg(e)
+            exit(1)
+        ]
+    ]
+]
+
+fun run_gamescope(gs_args: List<Str>) [
+    match find_binary("gamescope") [
+        None -> [
+            err_msg("gamescope nie jest zainstalowany\nZainstaluj: sudo apt install gamescope")
+            exit(1)
+        ]
+        Some(p) -> [
+            print_banner()
+            warn_msg("Uruchamiam gamescope…")
+            exit(run_command_inherit(p, gs_args))
+        ]
+    ]
+]
+
+fun do_switch(target: Str) [
+    print_banner()
+    if target == "game-mode" [
+        warn_msg("Przełączam na tryb gry…")
+        match switch_to_game() [
+            Ok(_a) -> [
+                ok_msg("Tryb gry aktywny! Miłej gry! 🎮")
+            ]
+            Err(e) -> [
+                err_msg(e)
+                exit(1)
+            ]
+        ]
+    ] elif target == "desktop-mode" [
+        warn_msg("Przełączam na tryb pulpitu…")
+        match switch_to_desktop() [
+            Ok(_b) -> [
+                ok_msg("KDE Plasma uruchomiona! 🖥")
+            ]
+            Err(e2) -> [
+                err_msg(e2)
+                exit(1)
+            ]
+        ]
+    ] else [
+        err_msg("nieznany tryb: \"" + target + "\" — użyj game-mode lub desktop-mode")
+        exit(1)
+    ]
+]
+
+fun main() [
+    let argv = args()
+
+    !! Bez argumentow -> TUI.
+    if argv.len() == 0 [
+        require_distro()
+        run_tui()
+        end
+    ]
+
+    let cmd: Str = argv[0].to_lowercase()
+
+    !! help i version nie wymagaja weryfikacji dystrybucji.
+    if cmd == "help" or cmd == "--help" or cmd == "-h" [
+        print_help()
+        exit(0)
+    ]
+    if cmd == "version" or cmd == "--version" [
+        print_banner()
+        log("  gaming-cli " + version())
+        log("  HackerOS Gaming Edition · Debian Testing (Forky)")
+        log("")
+        exit(0)
+    ]
+
+    require_distro()
+
+    if cmd == "tui" [
+        run_tui()
+    ] elif cmd == "switch" [
+        if argv.len() < 2 [
+            print_banner()
+            err_msg("podaj tryb: game-mode lub desktop-mode")
+            exit(1)
+        ]
+        do_switch(argv[1].to_lowercase())
+    ] elif cmd == "status" [
+        print_status()
+    ] elif cmd == "info" [
+        print_info()
+    ] elif cmd == "gamescope" [
+        let rest: List<Str> = []
+        let i = 1
+        while i < argv.len() [
+            rest.push(argv[i].clone())
+            i = i + 1
+        ]
+        run_gamescope(rest)
+    ] else [
+        print_banner()
+        err_msg("nieznana komenda: \"" + cmd + "\"")
+        log("  Użyj " + accent("gaming-cli help") + " aby uzyskać pomoc.")
+        exit(1)
+    ]
+    end
+]
