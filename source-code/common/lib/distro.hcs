@@ -1,0 +1,105 @@
+get <std:string> import <str_trim::str_split::str_starts_with::str_index_of>
+
+!!! Weryfikacja dystrybucji - narzedzia dzialaja WYLACZNIE na HackerOS Gaming
+!!! Edition:
+!!!   /etc/os-release              -> NAME=HackerOS
+!!!   /etc/xdg/kcm-about-distrorc  -> Variant=Gaming Edition
+
+fun os_release_path() -> Str [ end "/etc/os-release" ]
+fun kcm_about_path() -> Str [ end "/etc/xdg/kcm-about-distrorc" ]
+fun required_name() -> Str [ end "HackerOS" ]
+fun required_variant() -> Str [ end "Gaming Edition" ]
+
+!!! Wartosc klucza z pliku `KLUCZ=wartosc` (os-release) albo INI. Komentarze
+!!! (`#`, a w INI tez `;`) i naglowki `[sekcja]` sa pomijane; cudzyslowy
+!!! wokol wartosci zdejmowane. `Err` gdy pliku nie da sie odczytac.
+fun kv_file_get(path: Str, key: Str, ini: Bool) -> Result<Option<Str>, Str> [
+    let content = read_file(path)?
+    for raw in str_split(content, "\n") [
+        let line = str_trim(raw)
+        if line.len() == 0 or str_starts_with(line.clone(), "#") [
+            continue
+        ]
+        if ini and (str_starts_with(line.clone(), ";") or str_starts_with(line.clone(), "[")) [
+            continue
+        ]
+        match str_index_of(line.clone(), "=") [
+            Some(i) -> [
+                let k = str_trim(line.slice(0, i))
+                if k == key [
+                    let v: Str = str_trim(line.slice(i + 1, line.len()))
+                    if v.len() >= 2 [
+                        let first = v.char_at(0)
+                        let last = v.char_at(v.len() - 1)
+                        if (first == "\"" or first == "'") and first == last [
+                            v = v.slice(1, v.len() - 1)
+                        ]
+                    ]
+                    end ok(some(v))
+                ]
+            ]
+            None -> [
+            ]
+        ]
+    ]
+    end ok(none())
+]
+
+fun kv_or(path: Str, key: Str, ini: Bool, fallback: Str) -> Str [
+    match kv_file_get(path, key, ini) [
+        Ok(o) -> [
+            match o [
+                Some(v) -> [
+                    end v
+                ]
+                None -> [
+                    end fallback
+                ]
+            ]
+        ]
+        Err(_e) -> [
+            end fallback
+        ]
+    ]
+]
+
+!!! Sprawdza obie cechy dystrybucji. `tool` to nazwa narzedzia w komunikacie.
+fun check_distro(tool: Str) -> Result<Bool, Str> [
+    let suffix = "\n" + tool + " dziala wylacznie na HackerOS Gaming Edition."
+    let name = match_kv(os_release_path(), "NAME", false)
+    match name [
+        Err(e) -> [
+            end err("nie mozna odczytac " + os_release_path() + ": " + e + suffix)
+        ]
+        Ok(n) -> [
+            if n != required_name() [
+                end err("niezgodna dystrybucja: NAME=\"" + n + "\" (oczekiwano \"" + required_name() + "\")." + suffix)
+            ]
+        ]
+    ]
+    let variant = match_kv(kcm_about_path(), "Variant", true)
+    match variant [
+        Err(e2) -> [
+            end err("nie mozna odczytac " + kcm_about_path() + ": " + e2 + suffix)
+        ]
+        Ok(v) -> [
+            if v != required_variant() [
+                end err("niezgodna edycja: Variant=\"" + v + "\" (oczekiwano \"" + required_variant() + "\")." + suffix)
+            ]
+        ]
+    ]
+    end ok(true)
+]
+
+!!! Jak `kv_file_get`, ale brak klucza daje pusty tekst (a nie `None`).
+fun match_kv(path: Str, key: Str, ini: Bool) -> Result<Str, Str> [
+    let o = kv_file_get(path, key, ini)?
+    match o [
+        Some(v) -> [
+            end ok(v)
+        ]
+        None -> [
+            end ok("")
+        ]
+    ]
+]
