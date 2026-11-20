@@ -1,0 +1,136 @@
+using <0.6>
+
+!! gaming - krotki wrapper na gaming-cli (skroty: game, desktop, tui, ...).
+
+get <std:string> import <str_trim>
+get <work:common::sys> import <find_binary>
+get <work:common::style> import <primary::secondary::accent_faint::gray::dim::accent::pad_right::divider>
+get <work:common::ui> import <banner::err_msg::warn_msg>
+
+fun version() -> Str [ end "0.3.0" ]
+
+fun print_banner() [
+    banner("gaming", "v" + version() + " · wrapper dla gaming-cli")
+]
+
+!! Skrot -> argumenty gaming-cli (pusta lista = brak takiego skrotu).
+fun shortcut(name: Str) -> List<Str> [
+    if name == "game" [
+        end ["switch", "game-mode"]
+    ]
+    if name == "desktop" [
+        end ["switch", "desktop-mode"]
+    ]
+    if name == "status" [
+        end ["status"]
+    ]
+    if name == "info" [
+        end ["info"]
+    ]
+    if name == "tui" [
+        end ["tui"]
+    ]
+    if name == "version" [
+        end ["version"]
+    ]
+    end []
+]
+
+fun print_help() [
+    print_banner()
+    log(primary("  UŻYCIE"))
+    log("  " + secondary("gaming") + " " + gray("<skrót> [argumenty]"))
+    log("")
+    log(primary("  SKRÓTY"))
+    let items: List<List<Str>> = [
+        ["game", "Przełącz na tryb gry          (= gaming-cli switch game-mode)"],
+        ["desktop", "Przełącz na KDE Plasma         (= gaming-cli switch desktop-mode)"],
+        ["tui", "Otwórz interaktywne TUI        (= gaming-cli tui)"],
+        ["status", "Pokaż aktywny tryb             (= gaming-cli status)"],
+        ["info", "Informacje o środowisku        (= gaming-cli info)"],
+        ["version", "Pokaż wersję"],
+        ["help", "Ta pomoc"]
+    ]
+    for it in items [
+        log("  " + accent(pad_right(it[0].clone(), 16)) + gray(it[1].clone()))
+    ]
+    log("")
+    log("  " + divider(56))
+    log("  " + gray("Pozostałe argumenty są przekazywane bezpośrednio do gaming-cli."))
+    log("")
+]
+
+fun find_cli() -> Result<Str, Str> [
+    if path_exists("/usr/bin/gaming-cli") [
+        end ok("/usr/bin/gaming-cli")
+    ]
+    match find_binary("gaming-cli") [
+        Some(p) -> [
+            end ok(p)
+        ]
+        None -> [
+            end err("nie znaleziono 'gaming-cli' w /usr/bin ani w PATH\nUpewnij się że HackerOS Gaming Edition jest poprawnie zainstalowane")
+        ]
+    ]
+]
+
+!! Uruchamia gaming-cli z odziedziczonym terminalem i konczy z jego kodem wyjscia.
+fun run_cli(path: Str, cli_args: List<Str>) [
+    let code = run_command_inherit(path, cli_args)
+    exit(code)
+]
+
+fun main() [
+    let argv = args()
+    if argv.len() > 0 [
+        let first: Str = argv[0].to_lowercase()
+        if first == "help" or first == "--help" or first == "-h" [
+            print_help()
+            exit(0)
+        ]
+        if first == "version" or first == "--version" or first == "-v" [
+            print_banner()
+            exit(0)
+        ]
+    ]
+
+    let cli = ""
+    match find_cli() [
+        Ok(p) -> [
+            cli = p
+        ]
+        Err(e) -> [
+            err_msg(e)
+            exit(1)
+        ]
+    ]
+
+    !! Bez argumentow -> TUI (tak jak gaming-cli).
+    if argv.len() == 0 [
+        run_cli(cli, [])
+    ]
+
+    let first2: Str = argv[0].to_lowercase()
+    let final_args: List<Str> = shortcut(first2)
+    if final_args.len() > 0 [
+        let i = 1
+        while i < argv.len() [
+            final_args.push(argv[i].clone())
+            i = i + 1
+        ]
+    ] else [
+        final_args = argv.clone()
+    ]
+
+    !! Mini-baner dla akcji przelaczenia.
+    if final_args.len() >= 2 and final_args[0] == "switch" [
+        print_banner()
+        if final_args[1] == "game-mode" [
+            warn_msg("Przełączam na tryb gry…")
+        ] elif final_args[1] == "desktop-mode" [
+            warn_msg("Przełączam na tryb pulpitu…")
+        ]
+    ]
+    run_cli(cli, final_args)
+    end
+]
