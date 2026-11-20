@@ -1,0 +1,47 @@
+get <work:common::sys> import <read_trimmed>
+get <std:string> import <str_trim>
+
+!!! Stan trybu (game-mode / desktop-mode) trzymany w pliku stanu.
+
+fun state_dir() -> Str [ end "/var/lib/hackeros-gaming" ]
+fun log_dir() -> Str [ end "/var/log/hackeros-gaming" ]
+fun config_dir() -> Str [ end "/etc/hackeros" ]
+fun mode_file() -> Str [ end "/var/lib/hackeros-gaming/current-mode" ]
+fun mode_game() -> Str [ end "game-mode" ]
+fun mode_desktop() -> Str [ end "desktop-mode" ]
+
+!!! Aktualny tryb; brak pliku albo pusty plik = `desktop-mode`.
+fun current_mode() -> Result<Str, Str> [
+    if path_exists(mode_file()) == false [
+        end ok(mode_desktop())
+    ]
+    match read_file(mode_file()) [
+        Ok(t) -> [
+            let m = str_trim(t)
+            if m.len() == 0 [
+                end ok(mode_desktop())
+            ]
+            end ok(m)
+        ]
+        Err(e) -> [
+            end err("nie mozna odczytac pliku stanu: " + e)
+        ]
+    ]
+]
+
+fun current_mode_or_default() -> Str [
+    match current_mode() [
+        Ok(m) -> [
+            end m
+        ]
+        Err(_e) -> [
+            end mode_desktop()
+        ]
+    ]
+]
+
+fun set_mode(mode: Str) -> Result<Bool, Str> [
+    create_dir(state_dir())?
+    write_file(mode_file(), mode + "\n")?
+    end ok(true)
+]
