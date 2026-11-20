@@ -1,0 +1,17 @@
+[package]
+-> name        => gamescope-manager
+-> version     => 0.3.0
+-> description => Zarzadca sesji gamescope: start/stop/status/health/config (HackerOS Gaming Edition).
+-> authors     => ["HackerOS Team <hackeros068@gmail.com>"]
+-> license     => GPL-3.0
+-> lang        => HackerScript
+-> using       => 0.6
+
+[dependencies]
+-> common => work
+
+[build]
+-> link => static
+
+[default-build]
+-> profile => release
