@@ -1,0 +1,504 @@
+get <std:hk> import <hk_get_raw::hk_set_value>
+get <std:string> import <str_trim::str_split::str_join::str_starts_with::str_ends_with::str_contains::str_replace>
+get <work:common::sys> import <env_or::env_nonempty::parse_int_or::parse_bool::bool_str>
+
+fun config_file() -> Str [ end "/etc/hackeros/gamescope-manager.hk" ]
+
+!! Opis jednego klucza konfiguracji. kind: "int" | "bool" | "str" | "arr".
+struct KeySpec [
+    section: Str,
+    name: Str,
+    kind: Str,
+    default: Str,
+    comment: Str
+]
+
+fun ks(section: Str, name: Str, kind: Str, default: Str, comment: Str) -> KeySpec [
+    end KeySpec(section, name, kind, default, comment)
+]
+
+fun schema() -> List<KeySpec> [
+    end [
+        ks("gamescope", "width", "int", "0", "szerokosc wyjscia; 0 = auto-detekcja przez DRM"),
+        ks("gamescope", "height", "int", "0", "wysokosc wyjscia; 0 = auto-detekcja przez DRM"),
+        ks("gamescope", "refresh", "int", "0", "odswiezanie (Hz); 0 = auto"),
+        ks("gamescope", "fullscreen", "bool", "true", "tryb pelnoekranowy"),
+        ks("gamescope", "vsync", "bool", "true", "adaptive sync / VRR"),
+        ks("gamescope", "hdr", "bool", "false", "HDR (kernel >= 6.4, monitor HDR)"),
+        ks("gamescope", "mangoapp", "bool", "true", "overlay MangoHUD/mangoapp"),
+        ks("gamescope", "auto_steam", "bool", "true", "uruchom Steam razem z sesja"),
+        ks("gamescope", "force_composite", "bool", "false", "wymus kompozytor gamescope"),
+        ks("gamescope", "scaling_mode", "str", "auto", "auto | integer | fit | fill | stretch"),
+        ks("gamescope", "scaling_filter", "str", "linear", "linear | pixel | fsr | nis | nearest"),
+        ks("gamescope", "fsr_sharpness", "int", "5", "ostrosc FSR 0-20 (0 = max ostrosc)"),
+        ks("gamescope", "nis_sharpness", "int", "5", "ostrosc NIS 0-20 (0 = max ostrosc)"),
+        ks("gamescope", "internal_width", "int", "0", "wewnetrzna szerokosc renderowania; 0 = jak wyjscie"),
+        ks("gamescope", "internal_height", "int", "0", "wewnetrzna wysokosc renderowania; 0 = jak wyjscie"),
+        ks("gamescope", "output_connector", "str", "", "preferowane zlacze (HDMI-A-1, DP-1, eDP-1); puste = auto"),
+        ks("gamescope", "custom_refresh_rates", "str", "", "wlasne czestotliwosci VRR, np. \"40,50,60\""),
+        ks("gamescope", "extra_flags", "arr", "", "dodatkowe flagi gamescope, np. [\"--rt\"]"),
+        ks("steam", "big_picture", "bool", "true", "Steam Big Picture / Deck UI (-gamepadui)"),
+        ks("steam", "vr", "bool", "false", "SteamVR (-vr)"),
+        ks("steam", "no_cef_sandbox", "bool", "true", "bez sandboxa CEF (-no-cef-sandbox)"),
+        ks("steam", "tcp_mode", "bool", "false", "TCP zamiast UNIX socket (-nosharedmemory)"),
+        ks("steam", "no_verify", "bool", "false", "nie weryfikuj plikow gier (-noverifyfiles)"),
+        ks("steam", "full_desktop_res", "bool", "false", "pelna rozdzielczosc pulpitu (-fulldesktopres)"),
+        ks("steam", "allow_hidcrypto", "bool", "false", "szyfrowane urzadzenia HID (-allow-hidcrypto)"),
+        ks("steam", "disable_hwa", "bool", "false", "bez akceleracji GPU w UI Steam (-disable-gpu)"),
+        ks("steam", "beta_channel", "str", "", "\"\" | beta | steamdeckbeta | beta-client"),
+        ks("steam", "language", "str", "", "jezyk Steam; puste = systemowy"),
+        ks("steam", "extra_flags", "str", "", "dodatkowe flagi Steam, np. \"-console -silent\"")
+    ]
+]
+
+!! Wartosci konfiguracji: klucz "sekcja.nazwa" -> tekst.
+struct Config [
+    vals: Dict<Str, Str>
+]
+
+fun qkey(section: Str, name: Str) -> Str [
+    end section + "." + name
+]
+
+fun config_default() -> Config [
+    let vals: Dict<Str, Str> = dict()
+    for k in schema() [
+        vals.insert(qkey(k.section.clone(), k.name.clone()), k.default.clone())
+    ]
+    end Config(vals)
+]
+
+!! Dostep do wartosci - wolne funkcje (metody `impl` z literalami Str jako
+!! argumentami nie przechodza dzis typecheck'u Rusta, funkcje tak).
+fun cfg_val(c: Config, section: Str, name: Str) -> Str [
+    match c.vals.fetch(qkey(section, name)) [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end ""
+        ]
+    ]
+]
+
+fun cfg_num(c: Config, name: Str) -> Int [
+    end parse_int_or(cfg_val(c, "gamescope", name), 0)
+]
+
+fun cfg_flag(c: Config, name: Str) -> Bool [
+    end parse_bool(cfg_val(c, "gamescope", name))
+]
+
+fun cfg_text(c: Config, name: Str) -> Str [
+    end cfg_val(c, "gamescope", name)
+]
+
+fun cfg_st_flag(c: Config, name: Str) -> Bool [
+    end parse_bool(cfg_val(c, "steam", name))
+]
+
+fun cfg_st_text(c: Config, name: Str) -> Str [
+    end cfg_val(c, "steam", name)
+]
+
+!! Dodatkowe flagi gamescope jako lista (przechowywane jako tekst rozdzielony spacjami).
+fun cfg_extra_flags(c: Config) -> List<Str> [
+    let out: List<Str> = []
+    for f in str_split(cfg_val(c, "gamescope", "extra_flags"), " ") [
+        if f.len() > 0 [
+            out.push(f)
+        ]
+    ]
+    end out
+]
+
+!! Zwraca NOWY Config z ustawionym kluczem (parametry w HackerScript sa
+!! przekazywane przez referencje, wiec zamiast mutowac - kopiujemy mala mape).
+fun cfg_put(c: Config, section: Str, name: Str, value: Str) -> Config [
+    let vals: Dict<Str, Str> = c.vals.clone()
+    vals.insert(qkey(section, name), value)
+    end Config(vals)
+]
+
+!! ---- parsowanie surowych wartosci .hk ------------------------------------
+
+fun unquote(s: Str) -> Str [
+    let t = str_trim(s)
+    if t.len() >= 2 [
+        let a = t.char_at(0)
+        let b = t.char_at(t.len() - 1)
+        if a == "\"" and b == "\"" [
+            let inner: Str = t.slice(1, t.len() - 1)
+            end str_replace_all(inner, "\\\"", "\"")
+        ]
+    ]
+    end t
+]
+
+fun str_replace_all(s: Str, from: Str, to: Str) -> Str [
+    end str_replace(s, from, to)
+]
+
+!! Tablica [a, "b c", d] -> "a b c d" (flagi rozdzielone spacja).
+fun array_to_flags(raw: Str) -> Str [
+    let t = str_trim(raw)
+    if t.len() < 2 [
+        end ""
+    ]
+    let inner: Str = t.slice(1, t.len() - 1)
+    let parts: List<Str> = []
+    let cur: Str = ""
+    let in_q = false
+    let i = 0
+    while i < inner.len() [
+        let c = inner.char_at(i)
+        if c == "\"" [
+            in_q = in_q == false
+        ] elif c == "," and in_q == false [
+            let item = str_trim(cur)
+            if item.len() > 0 [
+                parts.push(item)
+            ]
+            cur = ""
+        ] else [
+            cur = cur + c
+        ]
+        i = i + 1
+    ]
+    let last = str_trim(cur)
+    if last.len() > 0 [
+        parts.push(last)
+    ]
+    end str_join(parts, " ")
+]
+
+!! Tekst flag -> tablica .hk: ["a", "b"]
+fun flags_to_array(flags: Str) -> Str [
+    let items: List<Str> = []
+    for f in str_split(flags, " ") [
+        if f.len() > 0 [
+            items.push("\"" + str_replace(f, "\"", "\\\"") + "\"")
+        ]
+    ]
+    end "[" + str_join(items, ", ") + "]"
+]
+
+fun needs_quotes(s: Str) -> Bool [
+    if s.len() == 0 [
+        end true
+    ]
+    end str_contains(s, ",") or str_contains(s, " ") or str_contains(s, "\"") or str_contains(s, "]") or str_contains(s, "[")
+]
+
+!! Wartosc do wpisania do pliku .hk dla danego rodzaju klucza.
+fun to_raw(kind: Str, value: Str) -> Str [
+    if kind == "arr" [
+        end flags_to_array(value)
+    ]
+    if kind == "str" [
+        if needs_quotes(value.clone()) [
+            end "\"" + str_replace(value, "\"", "\\\"") + "\""
+        ]
+        end value
+    ]
+    end value
+]
+
+fun from_raw(kind: Str, raw: Str) -> Str [
+    if kind == "arr" [
+        let t = str_trim(raw)
+        if str_starts_with(t.clone(), "[") and str_ends_with(t.clone(), "]") [
+            end array_to_flags(t)
+        ]
+        end unquote(t)
+    ]
+    if kind == "bool" [
+        if parse_bool(raw.clone()) [
+            end "true"
+        ]
+        end "false"
+    ]
+    if kind == "int" [
+        end (parse_int_or(raw, 0) as Str)
+    ]
+    end unquote(raw)
+]
+
+!! ---- ladowanie ---------------------------------------------------------------
+
+fun load_file_text() -> Option<Str> [
+    match read_file(config_file()) [
+        Ok(t) -> [
+            end some(t)
+        ]
+        Err(_e) -> [
+            end none()
+        ]
+    ]
+]
+
+fun apply_hk_file(base: Config) -> Config [
+    let cfg = base
+    match load_file_text() [
+        Some(src) -> [
+            for k in schema() [
+                match hk_get_raw(src.clone(), k.section.clone(), k.name.clone()) [
+                    Some(raw) -> [
+                        cfg = cfg_put(cfg, k.section.clone(), k.name.clone(), from_raw(k.kind.clone(), raw))
+                    ]
+                    None -> [
+                    ]
+                ]
+            ]
+        ]
+        None -> [
+        ]
+    ]
+    end cfg
+]
+
+fun env_override(cfg: Config, envname: Str, section: Str, name: Str, kind: Str) -> Config [
+    if env_nonempty(envname.clone()) [
+        end cfg_put(cfg, section, name, from_raw(kind, env_or(envname, "")))
+    ]
+    end cfg.clone()
+]
+
+!! Zmienne srodowiskowe HACKEROS_GS_* / HACKEROS_ST_* nadpisuja plik.
+fun apply_env(base: Config) -> Config [
+    let c = base
+    c = env_override(c, "HACKEROS_GS_WIDTH", "gamescope", "width", "int")
+    c = env_override(c, "HACKEROS_GS_HEIGHT", "gamescope", "height", "int")
+    c = env_override(c, "HACKEROS_GS_REFRESH", "gamescope", "refresh", "int")
+    c = env_override(c, "HACKEROS_GS_FULLSCREEN", "gamescope", "fullscreen", "bool")
+    c = env_override(c, "HACKEROS_GS_VSYNC", "gamescope", "vsync", "bool")
+    c = env_override(c, "HACKEROS_GS_HDR", "gamescope", "hdr", "bool")
+    c = env_override(c, "HACKEROS_GS_MANGOAPP", "gamescope", "mangoapp", "bool")
+    c = env_override(c, "HACKEROS_GS_AUTO_STEAM", "gamescope", "auto_steam", "bool")
+    c = env_override(c, "HACKEROS_GS_FORCE_COMPOSITE", "gamescope", "force_composite", "bool")
+    c = env_override(c, "HACKEROS_GS_SCALING_MODE", "gamescope", "scaling_mode", "str")
+    c = env_override(c, "HACKEROS_GS_SCALING_FILTER", "gamescope", "scaling_filter", "str")
+    c = env_override(c, "HACKEROS_GS_OUTPUT_CONNECTOR", "gamescope", "output_connector", "str")
+    c = env_override(c, "HACKEROS_ST_BIG_PICTURE", "steam", "big_picture", "bool")
+    c = env_override(c, "HACKEROS_ST_VR", "steam", "vr", "bool")
+    c = env_override(c, "HACKEROS_ST_NO_CEF_SANDBOX", "steam", "no_cef_sandbox", "bool")
+    c = env_override(c, "HACKEROS_ST_TCP", "steam", "tcp_mode", "bool")
+    c = env_override(c, "HACKEROS_ST_NO_VERIFY", "steam", "no_verify", "bool")
+    c = env_override(c, "HACKEROS_ST_FULL_DESKTOP", "steam", "full_desktop_res", "bool")
+    c = env_override(c, "HACKEROS_ST_ALLOW_HIDCRYPTO", "steam", "allow_hidcrypto", "bool")
+    c = env_override(c, "HACKEROS_ST_DISABLE_HWA", "steam", "disable_hwa", "bool")
+    c = env_override(c, "HACKEROS_ST_BETA_CHANNEL", "steam", "beta_channel", "str")
+    c = env_override(c, "HACKEROS_ST_LANGUAGE", "steam", "language", "str")
+    c = env_override(c, "HACKEROS_ST_EXTRA_FLAGS", "steam", "extra_flags", "str")
+    end c
+]
+
+!! Domyslne -> plik .hk -> zmienne srodowiskowe.
+fun config_load() -> Config [
+    end apply_env(apply_hk_file(config_default()))
+]
+
+!! ---- ustawianie pojedynczego klucza (config set / flagi CLI) -----------------
+
+!! Wynik `config_set_key`: nowa konfiguracja + zmieniony klucz.
+struct SetOut [
+    cfg: Config,
+    spec: KeySpec
+]
+
+!! Klucz moze byc podany jako "width", "steam.big_picture", "steam_extra_flags".
+fun resolve_key(key: Str) -> Option<KeySpec> [
+    let k: Str = key.to_lowercase()
+    let want_section = ""
+    if str_starts_with(k.clone(), "steam.") [
+        want_section = "steam"
+        k = k.slice(6, k.len())
+    ] elif str_starts_with(k.clone(), "gamescope.") [
+        want_section = "gamescope"
+        k = k.slice(10, k.len())
+    ] elif k == "steam_extra_flags" [
+        want_section = "steam"
+        k = "extra_flags"
+    ]
+    for s in schema() [
+        if s.name == k [
+            if want_section.len() == 0 or s.section == want_section [
+                end some(s)
+            ]
+        ]
+    ]
+    end none()
+]
+
+fun known_keys_help() -> Str [
+    let gs: List<Str> = []
+    let st: List<Str> = []
+    for s in schema() [
+        if s.section == "gamescope" [
+            gs.push(s.name)
+        ] else [
+            st.push(s.name)
+        ]
+    ]
+    end "Dostepne (gamescope): " + str_join(gs, ", ") + "\nDostepne (steam): " + str_join(st, ", ") + " (extra_flags steam jako steam_extra_flags)"
+]
+
+fun valid_in(v: Str, allowed: List<Str>) -> Bool [
+    for a in allowed [
+        if a == v [
+            end true
+        ]
+    ]
+    end false
+]
+
+!! Waliduje wartosc i zapisuje ja w `cfg`. Err z komunikatem, gdy wartosc jest zla.
+fun config_set_key(cfg: Config, key: Str, val: Str) -> Result<SetOut, Str> [
+    match resolve_key(key.clone()) [
+        None -> [
+            end err("nieznany klucz: \"" + key + "\"\n" + known_keys_help())
+        ]
+        Some(spec) -> [
+            let v = val.clone()
+            if spec.kind == "int" [
+                let t = str_trim(val.clone())
+                let n = parse_int_or(t.clone(), -1)
+                if n < 0 or ((n as Str) != t and t != "0") [
+                    end err(spec.name + ": oczekiwano liczby calkowitej >= 0 (0 = auto), dostano: \"" + val + "\"")
+                ]
+                if (spec.name == "fsr_sharpness" or spec.name == "nis_sharpness") and n > 20 [
+                    end err(spec.name + ": zakres 0-20")
+                ]
+                v = (n as Str)
+            ] elif spec.kind == "bool" [
+                if parse_bool(val.clone()) [
+                    v = "true"
+                ] else [
+                    v = "false"
+                ]
+            ] elif spec.name == "scaling_mode" [
+                if valid_in(val.clone(), ["auto", "integer", "fit", "fill", "stretch"]) == false [
+                    end err("scaling_mode: nieprawidlowa wartosc \"" + val + "\" (dostepne: auto, integer, fit, fill, stretch)")
+                ]
+            ] elif spec.name == "scaling_filter" [
+                if valid_in(val.clone(), ["linear", "pixel", "fsr", "nis", "nearest"]) == false [
+                    end err("scaling_filter: nieprawidlowa wartosc \"" + val + "\" (dostepne: linear, pixel, fsr, nis, nearest)")
+                ]
+            ]
+            end ok(SetOut(cfg_put(cfg, spec.section.clone(), spec.name.clone(), v), spec))
+        ]
+    ]
+]
+
+!! ---- zapis ---------------------------------------------------------------------
+
+fun header_text() -> Str [
+    end "! HackerOS Gamescope Manager - konfiguracja (.hk) v0.3\n! Edytuj recznie lub przez: sudo gamescope-manager config set <klucz> <wartosc>\n! Lub przez: gaming-cli tui -> Ustawienia\n! width=0 / height=0 = auto-detekcja rozdzielczosci przez DRM\n! Format: https://hackeros-linux-system.github.io/HackerOS-Website/tools-docs/hk.html\n\n"
+]
+
+!! Pelny, skomentowany plik .hk z samych domyslnych wartosci (config reset / pierwszy zapis).
+fun default_hk_text() -> Str [
+    let out: Str = header_text()
+    let cur_section = ""
+    for k in schema() [
+        if k.section != cur_section [
+            if cur_section.len() > 0 [
+                out = out + "\n"
+            ]
+            out = out + "[" + k.section + "]\n\n"
+            cur_section = k.section.clone()
+        ]
+        out = out + "! " + k.comment + "\n"
+        out = out + "-> " + k.name + " => " + to_raw(k.kind.clone(), k.default.clone()) + "\n\n"
+    ]
+    end out
+]
+
+fun write_config_text(text: Str) -> Result<Bool, Str> [
+    create_dir("/etc/hackeros")?
+    write_file(config_file(), text)?
+    end ok(true)
+]
+
+!! Zapisuje JEDEN klucz do pliku, nie ruszajac reszty (komentarze zostaja).
+fun config_save_key(spec: KeySpec, value: Str) -> Result<Bool, Str> [
+    let base = default_hk_text()
+    match load_file_text() [
+        Some(t) -> [
+            base = t
+        ]
+        None -> [
+        ]
+    ]
+    let updated = hk_set_value(base, spec.section.clone(), spec.name.clone(), to_raw(spec.kind.clone(), value))?
+    end write_config_text(updated)
+]
+
+!! Zapisuje WSZYSTKIE klucze (uzywane tylko gdy trzeba odtworzyc plik).
+fun config_reset() -> Result<Bool, Str> [
+    end write_config_text(default_hk_text())
+]
+
+fun auto_or_val(v: Int) -> Str [
+    if v == 0 [
+        end "0 (auto)"
+    ]
+    end (v as Str)
+]
+
+fun or_default(s: Str, d: Str) -> Str [
+    if s.len() == 0 [
+        end d
+    ]
+    end s
+]
+
+fun config_print(cfg: Config) [
+    log("  Plik konfiguracyjny: " + config_file())
+    log("")
+    let cur = ""
+    for k in schema() [
+        if k.section != cur [
+            if cur.len() > 0 [
+                log("")
+            ]
+            log("  [" + k.section + "]")
+            cur = k.section.clone()
+        ]
+        let v = cfg_val(cfg, k.section.clone(), k.name.clone())
+        let shown = v.clone()
+        if k.name == "width" or k.name == "height" or k.name == "refresh" or k.name == "internal_width" or k.name == "internal_height" [
+            shown = auto_or_val(parse_int_or(v.clone(), 0))
+        ] elif k.name == "output_connector" [
+            shown = or_default(v.clone(), "(auto)")
+        ] elif k.name == "custom_refresh_rates" [
+            shown = or_default(v.clone(), "(brak)")
+        ] elif k.name == "beta_channel" [
+            shown = or_default(v.clone(), "(brak)")
+        ] elif k.name == "language" [
+            shown = or_default(v.clone(), "(systemowy)")
+        ] elif k.section == "steam" and k.name == "extra_flags" [
+            shown = or_default(v.clone(), "(brak)")
+        ]
+        let label = k.name.clone()
+        if k.section == "steam" and k.name == "extra_flags" [
+            label = "steam_extra_flags"
+        ]
+        let pad = label.clone()
+        while pad.len() < 22 [
+            pad = pad + " "
+        ]
+        log("  " + pad + " = " + shown)
+    ]
+]
+
+!! Maszynowy zrzut `klucz=wartosc` (bez ozdobnikow) - czyta go gaming-cli TUI.
+fun config_dump(cfg: Config) [
+    for k in schema() [
+        let label = k.name.clone()
+        if k.section == "steam" and k.name == "extra_flags" [
+            label = "steam_extra_flags"
+        ]
+        log(label + "=" + cfg_val(cfg, k.section.clone(), k.name.clone()))
+    ]
+]
