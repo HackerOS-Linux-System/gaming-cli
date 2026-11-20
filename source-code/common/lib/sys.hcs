@@ -1,0 +1,286 @@
+get <crates:libc::0.2>
+get <std:env> import <env_path_entries>
+get <std:string> import <str_trim::str_split::str_join>
+get <std:process> import <command_succeeds>
+
+!!! Pomocnicze wywolania systemowe wspolne dla gaming-cli / gaming /
+!!! gamescope-manager. HackerScript nie ma wbudowanych `geteuid`/`kill`/
+!!! `sleep`, wiec cienkie opakowania na libc / std stoja tutaj, w jednym
+!!! miejscu (reszta kodu jest czystym HackerScriptem).
+
+fun geteuid() -> Int [
+    let v = 0
+    native {Rust} [
+        v = unsafe { libc::geteuid() } as i64;
+    ]
+    end v
+]
+
+fun getuid() -> Int [
+    let v = 0
+    native {Rust} [
+        v = unsafe { libc::getuid() } as i64;
+    ]
+    end v
+]
+
+fun getpid() -> Int [
+    let v = 0
+    native {Rust} [
+        v = std::process::id() as i64;
+    ]
+    end v
+]
+
+fun sleep_ms(ms: Int) [
+    native {Rust} [
+        std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+    ]
+]
+
+fun sleep_secs(s: Int) [
+    sleep_ms(s * 1000)
+]
+
+!!! `kill(pid, 0)` - czy proces zyje.
+fun pid_alive(pid: Int) -> Bool [
+    let r = false
+    native {Rust} [
+        r = unsafe { libc::kill(pid as i32, 0) } == 0;
+    ]
+    end r
+]
+
+!!! Wysyla sygnal; zwraca true przy sukcesie.
+fun send_signal(pid: Int, sig: Int) -> Bool [
+    let r = false
+    native {Rust} [
+        r = unsafe { libc::kill(pid as i32, sig as i32) } == 0;
+    ]
+    end r
+]
+
+fun sig_term() -> Int [ end 15 ]
+fun sig_kill() -> Int [ end 9 ]
+
+fun str_or_empty(o: Option<Str>) -> Str [
+    match o [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end ""
+        ]
+    ]
+]
+
+fun env_or(name: Str, default: Str) -> Str [
+    match env_var(name) [
+        Some(v) -> [
+            end v
+        ]
+        None -> [
+            end default
+        ]
+    ]
+]
+
+fun env_nonempty(name: Str) -> Bool [
+    match env_var(name) [
+        Some(v) -> [
+            end v.len() > 0
+        ]
+        None -> [
+            end false
+        ]
+    ]
+]
+
+!!! Plik tekstowy -> tekst bez bialych znakow na brzegach (albo `fallback`).
+fun read_trimmed(path: Str, fallback: Str) -> Str [
+    match read_file(path) [
+        Ok(t) -> [
+            end str_trim(t)
+        ]
+        Err(_e) -> [
+            end fallback
+        ]
+    ]
+]
+
+!!! Szuka pliku wykonywalnego: najpierw stale katalogi systemowe, potem PATH.
+fun find_binary(name: Str) -> Option<Str> [
+    let fixed: List<Str> = ["/usr/bin/", "/usr/local/bin/", "/usr/games/"]
+    for d in fixed [
+        let p: Str = d + "" + name
+        if path_exists(p.clone()) [
+            end some(p)
+        ]
+    ]
+    for dir in env_path_entries() [
+        if dir.len() > 0 [
+            let p2: Str = dir + "/" + name
+            if path_exists(p2.clone()) [
+                end some(p2)
+            ]
+        ]
+    ]
+    end none()
+]
+
+fun process_running(name: Str) -> Bool [
+    end command_succeeds("pgrep", ["-x", name])
+]
+
+fun service_active(svc: Str) -> Bool [
+    end command_succeeds("systemctl", ["is-active", "--quiet", svc])
+]
+
+!!! `systemctl <akcja> <usluga>` z odziedziczonym stdout/stderr.
+fun systemctl(action: Str, svc: Str) -> Bool [
+    end run_command_inherit("systemctl", [action, svc]) == 0
+]
+
+fun chvt(tty: Str) -> Bool [
+    end command_succeeds("chvt", [tty])
+]
+
+!!! Aktualny czas lokalny "RRRR-MM-DD GG:MM:SS" (przez `date`, bez zaleznosci).
+fun timestamp() -> Str [
+    match run_command("date", ["+%Y-%m-%d %H:%M:%S"]) [
+        Ok(o) -> [
+            end str_trim(o)
+        ]
+        Err(_e) -> [
+            end "?"
+        ]
+    ]
+]
+
+fun ensure_dirs(dirs: List<Str>) [
+    for d in dirs [
+        let _r = create_dir(d)
+    ]
+]
+
+fun parse_int_or(s: Str, default: Int) -> Int [
+    let t = str_trim(s)
+    if t.len() == 0 [
+        end default
+    ]
+    let neg = false
+    let digits: Str = t.clone()
+    if t.char_at(0) == "-" [
+        neg = true
+        digits = t.slice(1, t.len())
+    ]
+    if digits.len() == 0 [
+        end default
+    ]
+    let acc = 0
+    let i = 0
+    while i < digits.len() [
+        let c = digits.char_at(i)
+        if c < "0" or c > "9" [
+            end default
+        ]
+        let d = 0
+        native {Rust} [
+            d = (c.as_bytes()[0] - b'0') as i64;
+        ]
+        acc = acc * 10 + d
+        i = i + 1
+    ]
+    if neg [
+        end 0 - acc
+    ]
+    end acc
+]
+
+fun bool_str(b: Bool) -> Str [
+    if b [
+        end "true"
+    ]
+    end "false"
+]
+
+fun parse_bool(s: Str) -> Bool [
+    let t = str_trim(s).to_lowercase()
+    end t == "true" or t == "1" or t == "yes" or t == "on"
+]
+
+!! Startuje proces w tle (bez czekania). `env_sets` = "K=V" NADPISUJE zmienne.
+!! Zwraca PID dziecka.
+fun spawn_detached(path: Str, argv: List<Str>, env_sets: List<Str>) -> Result<Int, Str> [
+    let pid = 0
+    let why = ""
+    let started = false
+    native {Rust} [
+        let mut cmd = std::process::Command::new(&path);
+        cmd.args(argv.iter());
+        for kv in env_sets.iter() {
+            if let Some((k, v)) = kv.split_once('=') {
+                cmd.env(k, v);
+            }
+        }
+        cmd.stdin(std::process::Stdio::null());
+        match cmd.spawn() {
+            Ok(child) => {
+                pid = child.id() as i64;
+                started = true;
+            }
+            Err(e) => {
+                why = format!("{}", e);
+            }
+        }
+    ]
+    if started [
+        end ok(pid)
+    ]
+    end err(why)
+]
+
+!! Stdout polecenia (przyciety) albo `fallback` gdy polecenie zawiedzie.
+fun capture_or(program: Str, cmd_args: List<Str>, fallback: Str) -> Str [
+    match run_command(program, cmd_args) [
+        Ok(o) -> [
+            let t = str_trim(o)
+            if t.len() == 0 [
+                end fallback
+            ]
+            end t
+        ]
+        Err(_e) -> [
+            end fallback
+        ]
+    ]
+]
+
+!! Zapis na stdout BEZ nowej linii, z natychmiastowym flush (TUI rysuje cale klatki).
+fun out(s: Str) [
+    native {Rust} [
+        use std::io::Write;
+        let mut so = std::io::stdout();
+        let _ = so.write_all(s.as_bytes());
+        let _ = so.flush();
+    ]
+]
+
+!! Czy na stdin sa dane do odczytu w ciagu `ms` milisekund (poll(2)).
+fun stdin_ready(ms: Int) -> Bool [
+    let r = false
+    native {Rust} [
+        let mut pfd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+        r = unsafe { libc::poll(&mut pfd, 1, ms as i32) } > 0;
+    ]
+    end r
+]
+
+!! Znak ASCII o kodzie `b`.
+fun char_from(b: Int) -> Str [
+    let s = ""
+    native {Rust} [
+        s = ((b as u8) as char).to_string();
+    ]
+    end s
+]
