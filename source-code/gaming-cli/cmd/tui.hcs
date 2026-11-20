@@ -1,0 +1,399 @@
+get <std:string> import <str_trim::str_split::str_starts_with>
+get <std:term> import <term_raw_enter::term_raw_leave::term_read_byte::term_height::term_width>
+get <work:common::sys> import <out::stdin_ready::char_from>
+get <work:common::style> import <accent::gray::dim::white::white_b::green::red::yellow::pad_right::divider::selected::selected_sub::green_n::yellow_n::secondary::primary>
+get <work:common::mode> import <current_mode_or_default>
+get <work:common::ui> import <mode_badge>
+
+!! Nazwa klawisza: up/down/left/right/enter/esc/space/backspace/tab/ctrl-c lub sam znak.
+fun read_key() -> Str [
+    let b = term_read_byte()
+    if b < 0 [
+        end "eof"
+    ]
+    if b == 27 [
+        if stdin_ready(50) == false [
+            end "esc"
+        ]
+        let b2 = term_read_byte()
+        if b2 == 91 or b2 == 79 [
+            let b3 = term_read_byte()
+            if b3 == 65 [
+                end "up"
+            ]
+            if b3 == 66 [
+                end "down"
+            ]
+            if b3 == 67 [
+                end "right"
+            ]
+            if b3 == 68 [
+                end "left"
+            ]
+            !! sekwencje typu ESC [ 3 ~ - polknij reszte
+            while b3 >= 48 and b3 <= 57 [
+                b3 = term_read_byte()
+            ]
+            end "other"
+        ]
+        end "esc"
+    ]
+    if b == 13 or b == 10 [
+        end "enter"
+    ]
+    if b == 32 [
+        end "space"
+    ]
+    if b == 127 or b == 8 [
+        end "backspace"
+    ]
+    if b == 9 [
+        end "tab"
+    ]
+    if b == 3 [
+        end "ctrl-c"
+    ]
+    if b < 32 [
+        end "other"
+    ]
+    if b >= 128 [
+        end "other"
+    ]
+    end char_from(b)
+]
+
+fun menu_items() -> List<List<Str>> [
+    end [
+        ["game", "🎮  Tryb gry", "Gamescope + Steam Big Picture"],
+        ["desktop", "🖥  Tryb pulpitu", "Powrót do KDE Plasma"],
+        ["info", "📊  Informacje", "Środowisko, GPU, wersje"],
+        ["settings", "⚙   Ustawienia", "Rozdzielczość, skalowanie, Steam"],
+        ["health", "🩺  Health check", "Diagnostyka gamescope-manager"],
+        ["gamescope", "🚀  Gamescope", "Uruchom gamescope po wyjściu z TUI"],
+        ["quit", "🚪  Wyjdź", ""]
+    ]
+]
+
+fun frame_head(title: Str) -> Str [
+    let h = "\e[H"
+    h = h + "\e[K\n"
+    h = h + "  " + primary("  HackerOS Gaming") + "  " + gray("·") + "  " + accent(title) + "\e[K\n"
+    h = h + "  " + dim(divider(60)) + "\e[K\n"
+    end h
+]
+
+fun frame_menu(cursor: Int, mode: Str, msg: Str) -> Str [
+    let f = frame_head("gaming-cli")
+    f = f + "  " + gray("Aktywny tryb: ") + mode_badge(mode) + "\e[K\n\e[K\n"
+    let i = 0
+    for it in menu_items() [
+        let label: Str = pad_right(it[1].clone(), 24)
+        if i == cursor [
+            f = f + "  " + selected(" ▸ " + label) + selected_sub(pad_right(it[2].clone(), 34)) + "\e[K\n"
+        ] else [
+            f = f + "  " + white("   " + label) + gray(it[2].clone()) + "\e[K\n"
+        ]
+        i = i + 1
+    ]
+    f = f + "\e[K\n"
+    if msg.len() > 0 [
+        f = f + "  " + yellow(msg) + "\e[K\n"
+    ]
+    f = f + "  " + gray("↑/↓ j/k  wybór   enter  zatwierdź   q  wyjście") + "\e[K\n\e[J"
+    end f
+]
+
+fun frame_lines(title: Str, body: List<Str>, hint: Str) -> Str [
+    let f = frame_head(title)
+    for l in body [
+        f = f + "  " + l + "\e[K\n"
+    ]
+    f = f + "\e[K\n  " + gray(hint) + "\e[K\n\e[J"
+    end f
+]
+
+fun info_body() -> List<Str> [
+    let body: List<Str> = []
+    for r in info_rows(gather_info()) [
+        body.push(gray(pad_right(r[0].clone(), 14)) + dim(" : ") + style_info_value(r[1].clone()))
+    ]
+    end body
+]
+
+fun health_body() -> List<Str> [
+    let body: List<Str> = []
+    match find_binary("gamescope-manager") [
+        None -> [
+            body.push(red("gamescope-manager nie znaleziony w PATH"))
+        ]
+        Some(gm) -> [
+            match run_command(gm, ["health", "dump"]) [
+                Err(e) -> [
+                    body.push(red("Błąd health check: " + e))
+                ]
+                Ok(text) -> [
+                    for raw in str_split(text, "\n") [
+                        let line: Str = raw
+                        let parts = str_split(line.clone(), "\t")
+                        if parts.len() >= 3 [
+                            let st: Str = parts[0].clone()
+                            let badge = green("  OK ")
+                            if st == "WARN" [
+                                badge = yellow(" WARN")
+                            ]
+                            if st == "FAIL" [
+                                badge = red(" FAIL")
+                            ]
+                            body.push(badge + "  " + white(pad_right(parts[1].clone(), 20)) + gray(parts[2].clone()))
+                        ] elif str_starts_with(line.clone(), "READY=") [
+                            body.push("")
+                            if line == "READY=true" [
+                                body.push(green("Gotowy do uruchomienia sesji gry"))
+                            ] else [
+                                body.push(red("Sesja gry NIE może wystartować — popraw błędy FAIL"))
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+    end body
+]
+
+fun value_text(f: Field, vals: Dict<Str, Str>) -> Str [
+    let v = sv(vals, f.id.clone())
+    if f.kind == "bool" [
+        if parse_bool(v) [
+            end green_n("[x] włączone")
+        ]
+        end gray("[ ] wyłączone")
+    ]
+    if f.kind == "select" [
+        let idx = index_of_str(f.opts.clone(), v)
+        if f.labels.len() > idx [
+            end white_b(f.labels[idx].clone())
+        ]
+        end white_b(v)
+    ]
+    if f.kind == "num" [
+        if f.id == "refresh" and v == "0" [
+            end white_b("auto")
+        ]
+        end white_b(v)
+    ]
+    if f.kind == "text" [
+        if v.len() == 0 [
+            end gray("(puste)")
+        ]
+        end white_b(v)
+    ]
+    end ""
+]
+
+fun frame_settings(vals: Dict<Str, Str>, cur: Int, editing: Bool, buf: Str, dirty: Bool, msg: Str) -> Str [
+    let fields = visible_fields(vals)
+    let f = frame_head("Ustawienia")
+    let h = term_height()
+    let room = h - 9
+    if room < 6 [
+        room = 6
+    ]
+    let start = 0
+    if cur >= room [
+        start = cur - room + 1
+    ]
+    let i = start
+    let last_section = ""
+    let shown = 0
+    while i < fields.len() and shown < room [
+        let fl: Field = fields[i].clone()
+        let line = ""
+        let label: Str = pad_right(fl.label.clone(), 26)
+        let val = value_text(fl.clone(), vals)
+        if fl.kind == "action" [
+            val = ""
+        ]
+        if editing and i == cur [
+            val = accent(buf + "▏")
+        ]
+        if i == cur [
+            line = selected(" ▸ " + label) + "  " + val
+        ] else [
+            line = white("   " + label) + "  " + val
+        ]
+        f = f + "  " + line + "\e[K\n"
+        i = i + 1
+        shown = shown + 1
+    ]
+    let cf: Field = fields[cur].clone()
+    f = f + "\e[K\n"
+    let tip = cf.hint.clone()
+    if cf.kind == "select" and cf.descs.len() > 0 [
+        tip = cf.descs[index_of_str(cf.opts.clone(), sv(vals, cf.id.clone()))].clone()
+    ]
+    f = f + "  " + gray(tip) + "\e[K\n"
+    if msg.len() > 0 [
+        f = f + "  " + yellow(msg) + "\e[K\n"
+    ] elif dirty [
+        f = f + "  " + yellow("● niezapisane zmiany") + "\e[K\n"
+    ]
+    f = f + "  " + gray("↑/↓ pole  ←/→ zmiana  enter/space przełącz/edytuj  s zapisz  esc wróć") + "\e[K\n\e[J"
+    end f
+]
+
+fun run_tui() [
+    match term_raw_enter() [
+        Err(e) -> [
+            err_msg("TUI wymaga terminala: " + e)
+            exit(1)
+        ]
+        Ok(_r) -> [
+        ]
+    ]
+    out("\e[?1049h\e[?25l")
+    let screen = "menu"
+    let cursor = 0
+    let msg = ""
+    let vals = settings_defaults()
+    let scur = 0
+    let editing = false
+    let buf = ""
+    let dirty = false
+    let body: List<Str> = []
+    let after = ""
+    let items = menu_items()
+    while screen != "quit" [
+        if screen == "menu" [
+            out(frame_menu(cursor, current_mode_or_default(), msg))
+        ] elif screen == "info" [
+            out(frame_lines("Informacje", body.clone(), "dowolny klawisz — wróć"))
+        ] elif screen == "health" [
+            out(frame_lines("Health check", body.clone(), "dowolny klawisz — wróć"))
+        ] else [
+            out(frame_settings(vals.clone(), scur, editing, buf.clone(), dirty, msg))
+        ]
+        let key = read_key()
+        if key == "ctrl-c" or key == "eof" [
+            screen = "quit"
+        ] elif screen == "menu" [
+            msg = ""
+            if key == "up" or key == "k" [
+                cursor = wrap_idx(cursor - 1, items.len())
+            ] elif key == "down" or key == "j" [
+                cursor = wrap_idx(cursor + 1, items.len())
+            ] elif key == "q" or key == "esc" [
+                screen = "quit"
+            ] elif key == "enter" or key == "space" [
+                let id: Str = items[cursor][0].clone()
+                if id == "game" or id == "desktop" or id == "gamescope" [
+                    after = id
+                    screen = "quit"
+                ] elif id == "info" [
+                    body = info_body()
+                    screen = "info"
+                ] elif id == "health" [
+                    out(frame_lines("Health check", ["Sprawdzam…"], ""))
+                    body = health_body()
+                    screen = "health"
+                ] elif id == "settings" [
+                    out(frame_lines("Ustawienia", ["Wczytuję ustawienia (sudo)…"], ""))
+                    vals = settings_load()
+                    scur = 0
+                    dirty = false
+                    editing = false
+                    screen = "settings"
+                ] else [
+                    screen = "quit"
+                ]
+            ]
+        ] elif screen == "info" or screen == "health" [
+            screen = "menu"
+        ] else [
+            msg = ""
+            let fields = visible_fields(vals)
+            if scur >= fields.len() [
+                scur = fields.len() - 1
+            ]
+            let fl: Field = fields[scur].clone()
+            if editing [
+                if key == "enter" [
+                    vals = with_val(vals, fl.id.clone(), str_trim(buf.clone()))
+                    dirty = true
+                    editing = false
+                ] elif key == "esc" [
+                    editing = false
+                ] elif key == "backspace" [
+                    if buf.len() > 0 [
+                        buf = buf.slice(0, buf.len() - 1)
+                    ]
+                ] elif key == "space" [
+                    buf = buf + " "
+                ] elif key.len() == 1 [
+                    buf = buf + key
+                ]
+            ] elif key == "up" or key == "k" [
+                scur = wrap_idx(scur - 1, fields.len())
+            ] elif key == "down" or key == "j" or key == "tab" [
+                scur = wrap_idx(scur + 1, fields.len())
+            ] elif key == "esc" or key == "q" [
+                screen = "menu"
+            ] elif key == "s" [
+                match settings_save(vals.clone()) [
+                    Ok(_s) -> [
+                        dirty = false
+                        msg = "✓ Ustawienia zapisane"
+                    ]
+                    Err(e) -> [
+                        msg = e
+                    ]
+                ]
+            ] elif key == "left" or key == "right" or key == "h" or key == "l" [
+                let d = 1
+                if key == "left" or key == "h" [
+                    d = 0 - 1
+                ]
+                if fl.kind != "action" and fl.kind != "text" [
+                    vals = adjust_field(fl.clone(), vals.clone(), d)
+                    dirty = true
+                ]
+            ] elif key == "enter" or key == "space" [
+                if fl.kind == "text" [
+                    editing = true
+                    buf = sv(vals.clone(), fl.id.clone())
+                ] elif fl.kind == "action" [
+                    if fl.id == "save" [
+                        match settings_save(vals.clone()) [
+                            Ok(_s2) -> [
+                                dirty = false
+                                msg = "✓ Ustawienia zapisane"
+                            ]
+                            Err(e2) -> [
+                                msg = e2
+                            ]
+                        ]
+                    ] elif fl.id == "cancel" [
+                        screen = "menu"
+                    ] else [
+                        vals = settings_defaults()
+                        dirty = true
+                        msg = "Przywrócono domyślne (nie zapisano)"
+                    ]
+                ] else [
+                    vals = adjust_field(fl.clone(), vals.clone(), 1)
+                    dirty = true
+                ]
+            ]
+        ]
+    ]
+    out("\e[?25h\e[?1049l")
+    term_raw_leave()
+    if after == "game" [
+        do_switch("game-mode")
+    ] elif after == "desktop" [
+        do_switch("desktop-mode")
+    ] elif after == "gamescope" [
+        let none: List<Str> = []
+        run_gamescope(none)
+    ]
+]
