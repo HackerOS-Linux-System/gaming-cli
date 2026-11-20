@@ -1,0 +1,71 @@
+get <std:process> import <command_succeeds>
+
+get <work:common::sys> import <find_binary::chvt::service_active::systemctl::sleep_secs::spawn_detached>
+get <work:common::mode> import <current_mode::set_mode::mode_game::mode_desktop::state_dir>
+
+fun plasma_tty() -> Str [ end "2" ]
+!! tty3 = tryb gry (NIE tty2, zeby nie zabijac SDDM).
+fun game_tty() -> Str [ end "3" ]
+fun plasma_service() -> Str [ end "sddm.service" ]
+fun game_mode_service() -> Str [ end "hackeros-game-mode.service" ]
+
+fun launch_manager_direct() -> Result<Bool, Str> [
+    match find_binary("gamescope-manager") [
+        None -> [
+            end err("gamescope-manager nie znaleziony")
+        ]
+        Some(p) -> [
+            let pid = spawn_detached(p, ["start", "--steam"], ["XDG_SESSION_TYPE=wayland", "XDG_CURRENT_DESKTOP=gamescope"])?
+            create_dir(state_dir())?
+            write_file(state_dir() + "/gamescope-manager.pid", (pid as Str) + "\n")?
+            end ok(true)
+        ]
+    ]
+]
+
+!! Przelacza na tryb gry. SDDM zostaje wlaczone - gamescope dziala na tty3.
+fun switch_to_game() -> Result<Bool, Str> [
+    let cur = current_mode()?
+    if cur == mode_game() [
+        end err("juz jestes w trybie gry")
+    ]
+    if chvt(game_tty()) == false [
+        elog("ostrzezenie TTY: chvt " + game_tty() + " nie powiodlo sie")
+    ]
+    if systemctl("start", game_mode_service()) == false [
+        match launch_manager_direct() [
+            Ok(_v) -> [
+            ]
+            Err(e) -> [
+                let _b = chvt(plasma_tty())
+                end err("nie mozna uruchomic trybu gry: " + e)
+            ]
+        ]
+    ]
+    end set_mode(mode_game())
+]
+
+fun switch_to_desktop() -> Result<Bool, Str> [
+    let cur = current_mode()?
+    if cur == mode_desktop() [
+        end err("juz jestes w trybie pulpitu")
+    ]
+    if service_active(game_mode_service()) [
+        let _s = systemctl("stop", game_mode_service())
+        sleep_secs(2)
+    ] else [
+        !! Fallback: zatrzymaj gamescope-manager i gamescope.
+        let _a = command_succeeds("pkill", ["-TERM", "gamescope-manager"])
+        let _b = command_succeeds("pkill", ["-TERM", "gamescope"])
+        sleep_secs(1)
+    ]
+    if chvt(plasma_tty()) == false [
+        elog("ostrzezenie TTY: chvt " + plasma_tty() + " nie powiodlo sie")
+    ]
+    if service_active(plasma_service()) == false [
+        if systemctl("start", plasma_service()) == false [
+            end err("nie mozna uruchomic SDDM")
+        ]
+    ]
+    end set_mode(mode_desktop())
+]
