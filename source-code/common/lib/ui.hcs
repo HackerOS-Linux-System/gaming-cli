@@ -1,0 +1,43 @@
+get <work:common::style> import <primary::secondary::accent::accent_faint::green::red::yellow::gray::white_b::dim::paint::esc_fg::esc_bg::pad_right::repeat_str>
+
+!!! Elementy interfejsu CLI wspolne dla wszystkich narzedzi (banner, komunikaty,
+!!! odznaki trybu).
+
+fun ok_msg(msg: Str) [
+    log("  " + green("✔") + "  " + white_b(msg))
+]
+
+fun err_msg(msg: Str) [
+    elog("  " + red("✖") + "  " + red(msg))
+]
+
+fun warn_msg(msg: Str) [
+    log("  " + yellow("⚠") + "  " + yellow(msg))
+]
+
+fun info_msg(msg: Str) [
+    log("  " + accent("·") + "  " + gray(msg))
+]
+
+fun section(title: Str) [
+    log(primary("  " + title))
+]
+
+!!! Wiersz "komenda   opis" z kolumna o stalej szerokosci.
+fun cmd_row(cmd: Str, desc: Str, width: Int) [
+    log("  " + accent(pad_right(cmd, width)) + gray(desc))
+]
+
+!!! Baner: dwie linie, `tool` + `tag` (np. wersja i platforma).
+fun banner(tool: Str, tag: Str) [
+    log(primary("  HackerOS Gaming Edition"))
+    log(secondary("  " + tool) + dim(" ─ ") + accent_faint(tag))
+    log("")
+]
+
+fun mode_badge(mode: Str) -> Str [
+    if mode == "game-mode" [
+        end paint(" 🎮 GAME MODE ", "\e[1m" + esc_bg(124, 58, 237) + esc_fg(249, 250, 251))
+    ]
+    end paint(" 🖥  DESKTOP MODE ", "\e[1m" + esc_bg(30, 64, 175) + esc_fg(249, 250, 251))
+]
