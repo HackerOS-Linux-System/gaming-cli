@@ -1,0 +1,485 @@
+using <0.6>
+
+!! gamescope-manager - zarzadzanie sesja gamescope + Steam Big Picture dla
+!! HackerOS Gaming Edition. Przepisane z Go na HackerScript.
+
+get <std:string> import <str_trim::str_split::str_join::str_starts_with::str_index_of>
+get <work:common::sys> import <geteuid::sleep_secs::parse_int_or::ensure_dirs::bool_str>
+get <work:common::distro> import <check_distro>
+get <work:common::mode> import <state_dir::log_dir::config_dir>
+get <work:common::style> import <primary::secondary::accent::red::gray::dim::white::green_n::yellow_n::pad_right::divider>
+get <work:common::ui> import <banner::ok_msg::err_msg::warn_msg::info_msg::section::cmd_row>
+
+include <config>
+include <display>
+include <session>
+include <health>
+include <runner>
+
+fun version() -> Str [ end "0.3.0" ]
+
+fun print_banner() [
+    banner("gamescope-manager", "v" + version() + "  ·  Debian Testing (Forky)  ·  PC / Laptop")
+]
+
+fun die(msg: Str) [
+    err_msg(msg)
+    exit(1)
+]
+
+!! ---- help ------------------------------------------------------------------------------
+
+fun rows(items: List<List<Str>>) [
+    for it in items [
+        cmd_row(it[0].clone(), it[1].clone(), 36)
+    ]
+]
+
+fun print_help() [
+    print_banner()
+    section("UZYCIE")
+    log("  " + secondary("sudo gamescope-manager") + " " + gray("<komenda> [opcje]"))
+    log("")
+    section("KOMENDY")
+    rows([
+        ["start", "Uruchom sesje gamescope + Steam BPM"],
+        ["start --no-steam", "Uruchom gamescope bez Steam"],
+        ["start-with-recovery", "Start z auto-restartem po crashu (dla systemd)"],
+        ["stop", "Zatrzymaj aktywna sesje"],
+        ["restart", "Zrestartuj sesje"],
+        ["status", "Status sesji, konfiguracja, wykryta rozdzielczosc"],
+        ["health", "Sprawdz czy wszystko jest gotowe do startu"],
+        ["health dump", "Maszynowy wynik health (dla gaming-cli)"],
+        ["detect", "Wykryj i pokaz natywna rozdzielczosc monitora"],
+        ["config", "Pokaz konfiguracje (.hk)"],
+        ["config set <k> <v>", "Ustaw klucz konfiguracji (komentarze w pliku zostaja)"],
+        ["config apply k=v ...", "Ustaw wiele kluczy naraz (jeden zapis)"],
+        ["config dump", "Maszynowy zrzut klucz=wartosc (dla gaming-cli)"],
+        ["config reset", "Przywroc konfiguracje domyslna"],
+        ["version", "Pokaz wersje"],
+        ["help", "Pokaz te pomoc"]
+    ])
+    log("")
+    section("OPCJE DLA 'start' (gamescope)")
+    rows([
+        ["--steam / --no-steam", "Wlacz/wylacz Steam BPM"],
+        ["--width <px>", "Szerokosc (0 = auto-detekcja z DRM)"],
+        ["--height <px>", "Wysokosc  (0 = auto-detekcja z DRM)"],
+        ["--refresh <hz>", "Czestotliwosc (0 = auto)"],
+        ["--hdr", "Wlacz HDR"],
+        ["--no-mangoapp", "Wylacz overlay FPS"],
+        ["--no-vsync", "Wylacz VSync/adaptive-sync"],
+        ["--no-fullscreen", "Tryb okienkowy"],
+        ["--force-composite", "Wymus kompozytor"],
+        ["--scaling-mode <tryb>", "Skalowanie: auto|integer|fit|fill|stretch"],
+        ["--scaling-filter <filtr>", "Filtr: linear|pixel|fsr|nis|nearest"],
+        ["--fsr-sharpness <0-20>", "Ostrosc FSR upscalingu"],
+        ["--output <zlacze>", "Zlacze wideo: HDMI-A-1, DP-1, eDP-1..."],
+        ["--extra \"flagi\"", "Dodatkowe flagi gamescope"]
+    ])
+    log("")
+    section("OPCJE DLA 'start' (steam)")
+    rows([
+        ["--no-big-picture", "Uruchom Steam w trybie pulpitu"],
+        ["--steam-vr", "Uruchom Steam VR"],
+        ["--steam-no-cef-sandbox", "Wylacz sandbox CEF"],
+        ["--steam-tcp", "Uzyj TCP zamiast socket"],
+        ["--steam-no-verify", "Nie weryfikuj plikow gier"],
+        ["--steam-beta <kanal>", "Kanal: beta|steamdeckbeta|beta-client"],
+        ["--steam-lang <jezyk>", "Jezyk: polish, english, ..."],
+        ["--steam-extra \"flagi\"", "Dodatkowe flagi steam"]
+    ])
+    log("")
+    section("ZMIENNE SRODOWISKOWE")
+    rows([
+        ["HACKEROS_GS_WIDTH=0", "0 = auto-detekcja rozdzielczosci"],
+        ["HACKEROS_GS_HEIGHT=0", "0 = auto-detekcja rozdzielczosci"],
+        ["HACKEROS_GS_REFRESH=0", "0 = auto refresh rate"],
+        ["HACKEROS_GS_SCALING_MODE", "Tryb skalowania"],
+        ["HACKEROS_GS_OUTPUT_CONNECTOR", "Preferowane zlacze wideo"],
+        ["HACKEROS_ST_BIG_PICTURE", "true/false — Steam Big Picture"],
+        ["HACKEROS_ST_BETA_CHANNEL", "Kanal beta Steam"]
+    ])
+    log("")
+    log("  " + divider(62))
+    log("  " + gray("Konfiguracja: " + config_file()))
+    log("  " + gray("width=0 / height=0 = auto-detekcja rozdzielczosci przez DRM"))
+    log("  " + gray("WYMAGA: sudo gamescope-manager <komenda>"))
+    log("")
+]
+
+!! ---- flagi 'start' -----------------------------------------------------------------------
+
+!! Flaga z wartoscia: ustawia klucz konfiguracji (z walidacja jak `config set`).
+fun apply_value(cfg: Config, key: Str, val: Str) -> Config [
+    match config_set_key(cfg.clone(), key.clone(), val) [
+        Ok(r) -> [
+            end r.cfg
+        ]
+        Err(e) -> [
+            warn_msg("pomijam " + key + ": " + e)
+            end cfg.clone()
+        ]
+    ]
+]
+
+fun parse_start_flags(base: Config, argv: List<Str>) -> Config [
+    let cfg = base
+    let i = 0
+    while i < argv.len() [
+        let a: Str = argv[i].to_lowercase()
+        let has_next = i + 1 < argv.len()
+        let nxt = ""
+        if has_next [
+            nxt = argv[i + 1].clone()
+        ]
+        let consumed = false
+        if a == "--steam" [
+            cfg = apply_value(cfg, "auto_steam", "true")
+        ] elif a == "--no-steam" [
+            cfg = apply_value(cfg, "auto_steam", "false")
+        ] elif a == "--hdr" [
+            cfg = apply_value(cfg, "hdr", "true")
+        ] elif a == "--no-mangoapp" [
+            cfg = apply_value(cfg, "mangoapp", "false")
+        ] elif a == "--no-vsync" [
+            cfg = apply_value(cfg, "vsync", "false")
+        ] elif a == "--no-fullscreen" [
+            cfg = apply_value(cfg, "fullscreen", "false")
+        ] elif a == "--force-composite" [
+            cfg = apply_value(cfg, "force_composite", "true")
+        ] elif a == "--no-big-picture" [
+            cfg = apply_value(cfg, "steam.big_picture", "false")
+        ] elif a == "--steam-vr" [
+            cfg = apply_value(cfg, "steam.vr", "true")
+        ] elif a == "--steam-no-cef-sandbox" [
+            cfg = apply_value(cfg, "steam.no_cef_sandbox", "true")
+        ] elif a == "--steam-tcp" [
+            cfg = apply_value(cfg, "steam.tcp_mode", "true")
+        ] elif a == "--steam-no-verify" [
+            cfg = apply_value(cfg, "steam.no_verify", "true")
+        ] elif has_next [
+            consumed = true
+            if a == "--width" [
+                cfg = apply_value(cfg, "width", nxt)
+            ] elif a == "--height" [
+                cfg = apply_value(cfg, "height", nxt)
+            ] elif a == "--refresh" [
+                cfg = apply_value(cfg, "refresh", nxt)
+            ] elif a == "--scaling-mode" [
+                cfg = apply_value(cfg, "scaling_mode", nxt)
+            ] elif a == "--scaling-filter" [
+                cfg = apply_value(cfg, "scaling_filter", nxt)
+            ] elif a == "--fsr-sharpness" [
+                cfg = apply_value(cfg, "fsr_sharpness", nxt)
+            ] elif a == "--output" [
+                cfg = apply_value(cfg, "output_connector", nxt)
+            ] elif a == "--extra" [
+                !! dolaczane do flag z konfiguracji
+                let merged = str_join(cfg_extra_flags(cfg.clone()), " ") + " " + nxt
+                cfg = apply_value(cfg, "extra_flags", str_trim(merged))
+            ] elif a == "--steam-beta" [
+                cfg = apply_value(cfg, "steam.beta_channel", nxt)
+            ] elif a == "--steam-lang" [
+                cfg = apply_value(cfg, "steam.language", nxt)
+            ] elif a == "--steam-extra" [
+                cfg = apply_value(cfg, "steam.extra_flags", nxt)
+            ] else [
+                consumed = false
+                warn_msg("nieznana opcja: " + argv[i].clone())
+            ]
+        ] else [
+            warn_msg("nieznana opcja: " + argv[i].clone())
+        ]
+        if consumed [
+            i = i + 1
+        ]
+        i = i + 1
+    ]
+    end cfg.clone()
+]
+
+!! ---- health / detect / config ---------------------------------------------------------------
+
+fun print_health() [
+    let cfg = config_load()
+    let rep = health_for(cfg)
+    log("  Sprawdzam gotowosc systemu do uruchomienia trybu gry...")
+    log("")
+    for r in rep.results.clone() [
+        let icon = ""
+        if r.ok [
+            icon = green_n("  [OK]")
+        ] elif r.fatal [
+            icon = err_color("  [!!]")
+        ] else [
+            icon = yellow_n("  [??]")
+        ]
+        let msg = ""
+        if r.ok [
+            msg = green_n(r.message.clone())
+        ] else [
+            msg = yellow_n(r.message.clone())
+        ]
+        log(icon + "  " + gray(pad_right(r.name.clone(), 34)) + "  " + msg)
+    ]
+    log("")
+    if rep.can_start [
+        ok_msg("System gotowy — mozna uruchomic tryb gry.")
+    ] else [
+        err_msg("Bledy krytyczne — napraw powyzsze problemy przed uruchomieniem.")
+    ]
+    log("")
+]
+
+!! Format maszynowy dla gaming-cli: STATUS<TAB>nazwa<TAB>komunikat, na koncu READY=true|false.
+fun print_health_dump() [
+    let rep = health_for(config_load())
+    for r in rep.results.clone() [
+        let st = "OK"
+        if r.ok == false [
+            if r.fatal [
+                st = "FAIL"
+            ] else [
+                st = "WARN"
+            ]
+        ]
+        log(st + "\t" + r.name + "\t" + r.message)
+    ]
+    log("READY=" + bool_str(rep.can_start))
+]
+
+fun err_color(t: Str) -> Str [
+    end red(t)
+]
+
+fun print_detect() [
+    log("  Wykrywam natywna rozdzielczosc monitora...")
+    log("")
+    let info = auto_detect_display()
+    let conn = info.connector.clone()
+    if conn.len() == 0 [
+        conn = "(auto)"
+    ]
+    log("  " + gray(pad_right("Zrodlo detekcji", 20)) + " : " + white(info.source.clone()))
+    log("  " + gray(pad_right("Rozdzielczosc", 20)) + " : " + white((info.width as Str) + "x" + (info.height as Str)))
+    log("  " + gray(pad_right("Czestotliwosc", 20)) + " : " + white((info.refresh as Str) + " Hz"))
+    log("  " + gray(pad_right("Zlacze", 20)) + " : " + white(conn))
+    log("")
+    if info.width == 0 [
+        warn_msg("Brak detekcji — gamescope sam wykryje rozdzielczosc przez DRM przy starcie.")
+    ] else [
+        ok_msg("Wykryto: " + format_resolution(info))
+    ]
+    log("")
+]
+
+fun handle_config(argv: List<Str>) [
+    if argv.len() == 0 [
+        config_print(config_load())
+        end
+    ]
+    let sub = argv[0].to_lowercase()
+    if sub == "show" [
+        config_print(config_load())
+    ] elif sub == "set" [
+        if argv.len() < 3 [
+            die("Uzycie: config set <klucz> <wartosc>")
+        ]
+        !! Walidacja na swiezo wczytanej konfiguracji, zapis TYLKO tego klucza.
+        match config_set_key(config_load(), argv[1].clone(), argv[2].clone()) [
+            Err(e) -> [
+                die(e)
+            ]
+            Ok(r) -> [
+                let stored = cfg_val(r.cfg, r.spec.section.clone(), r.spec.name.clone())
+                match config_save_key(r.spec.clone(), stored) [
+                    Ok(_v) -> [
+                        ok_msg("Ustawiono: " + argv[1].clone() + " = " + argv[2].clone())
+                        if (r.spec.name == "width" or r.spec.name == "height") and argv[2] == "0" [
+                            info_msg("width/height=0: rozdzielczosc bedzie auto-wykrywana przy nastepnym starcie")
+                        ]
+                    ]
+                    Err(e2) -> [
+                        die("Blad zapisu konfiguracji: " + e2)
+                    ]
+                ]
+            ]
+        ]
+    ] elif sub == "dump" [
+        config_dump(config_load())
+    ] elif sub == "apply" [
+        !! config apply k=v [k=v ...] - walidacja wszystkiego, potem zapis (jeden sudo
+        !! zamiast osobnego wywolania na kazdy klucz).
+        if argv.len() < 2 [
+            die("Uzycie: config apply <klucz=wartosc> [klucz=wartosc ...]")
+        ]
+        let cfg = config_load()
+        let specs: List<KeySpec> = []
+        let vals: List<Str> = []
+        let i = 1
+        while i < argv.len() [
+            let pair: Str = argv[i].clone()
+            match str_index_of(pair.clone(), "=") [
+                None -> [
+                    die("oczekiwano klucz=wartosc, dostano: \"" + pair + "\"")
+                ]
+                Some(eq) -> [
+                    match config_set_key(cfg.clone(), pair.slice(0, eq), pair.slice(eq + 1, pair.len())) [
+                        Err(e) -> [
+                            die(e)
+                        ]
+                        Ok(r) -> [
+                            cfg = r.cfg
+                            specs.push(r.spec.clone())
+                            vals.push(cfg_val(cfg.clone(), r.spec.section.clone(), r.spec.name.clone()))
+                        ]
+                    ]
+                ]
+            ]
+            i = i + 1
+        ]
+        let j = 0
+        while j < specs.len() [
+            match config_save_key(specs[j].clone(), vals[j].clone()) [
+                Ok(_w) -> [
+                ]
+                Err(e4) -> [
+                    die("Blad zapisu konfiguracji: " + e4)
+                ]
+            ]
+            j = j + 1
+        ]
+        ok_msg("Zapisano " + (specs.len() as Str) + " ustawien.")
+    ] elif sub == "reset" [
+        match config_reset() [
+            Ok(_v2) -> [
+                ok_msg("Konfiguracja przywrocona do domyslnej (rozdzielczosc: auto).")
+            ]
+            Err(e3) -> [
+                die(e3)
+            ]
+        ]
+    ] else [
+        die("nieznana subkomenda config: \"" + argv[0].clone() + "\"")
+    ]
+]
+
+!! ---- main --------------------------------------------------------------------------------------
+
+fun main() [
+    let argv = args()
+    if argv.len() == 0 [
+        print_help()
+        exit(0)
+    ]
+    let cmd: Str = argv[0].to_lowercase()
+    if cmd == "help" or cmd == "--help" or cmd == "-h" [
+        print_help()
+        exit(0)
+    ]
+    if cmd == "version" or cmd == "--version" [
+        print_banner()
+        log("  gamescope-manager " + version())
+        log("  HackerOS Gaming Edition · Debian Testing (Forky)")
+        log("  Konfiguracja: " + config_file())
+        log("")
+        exit(0)
+    ]
+
+    if geteuid() != 0 [
+        print_banner()
+        err_msg("gamescope-manager wymaga uprawnien roota")
+        elog("  Uzyj: sudo gamescope-manager")
+        elog("")
+        exit(1)
+    ]
+    match check_distro("gamescope-manager") [
+        Ok(_v) -> [
+        ]
+        Err(e) -> [
+            print_banner()
+            err_msg(e)
+            exit(1)
+        ]
+    ]
+    ensure_dirs([state_dir(), log_dir(), config_dir()])
+
+    let rest: List<Str> = []
+    let i = 1
+    while i < argv.len() [
+        rest.push(argv[i].clone())
+        i = i + 1
+    ]
+
+    if cmd == "start" [
+        let cfg = parse_start_flags(config_load(), rest)
+        print_banner()
+        warn_msg("Uruchamiam sesje gamescope...")
+        match session_start(cfg) [
+            Ok(_a) -> [
+            ]
+            Err(e1) -> [
+                die(e1)
+            ]
+        ]
+    ] elif cmd == "start-with-recovery" [
+        !! uzywane przez systemd - bez baneru
+        let cfg2 = parse_start_flags(config_load(), rest)
+        match session_start_with_recovery(cfg2) [
+            Ok(_b) -> [
+            ]
+            Err(e2) -> [
+                die(e2)
+            ]
+        ]
+    ] elif cmd == "stop" [
+        print_banner()
+        warn_msg("Zatrzymuje sesje gamescope...")
+        match session_stop() [
+            Ok(_c) -> [
+                ok_msg("Sesja zatrzymana.")
+            ]
+            Err(e3) -> [
+                die(e3)
+            ]
+        ]
+    ] elif cmd == "restart" [
+        print_banner()
+        warn_msg("Restartuje sesje gamescope...")
+        let _s = session_stop()
+        sleep_secs(2)
+        let cfg3 = parse_start_flags(config_load(), rest)
+        match session_start(cfg3) [
+            Ok(_d) -> [
+            ]
+            Err(e4) -> [
+                die(e4)
+            ]
+        ]
+    ] elif cmd == "status" [
+        print_banner()
+        session_status()
+    ] elif cmd == "health" [
+        if rest.len() > 0 and rest[0] == "dump" [
+            print_health_dump()
+        ] else [
+            print_banner()
+            print_health()
+        ]
+    ] elif cmd == "detect" [
+        print_banner()
+        print_detect()
+    ] elif cmd == "config" [
+        if rest.len() == 0 or rest[0] != "dump" [
+            print_banner()
+        ]
+        handle_config(rest)
+    ] else [
+        print_banner()
+        err_msg("nieznana komenda: \"" + cmd + "\"")
+        log("  Uzyj " + accent("gamescope-manager help") + " aby uzyskac pomoc.")
+        exit(1)
+    ]
+    end
+]
