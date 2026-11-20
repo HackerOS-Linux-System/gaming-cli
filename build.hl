@@ -1,6 +1,3 @@
-// go
-// golang
-// make
+|| HackerScript
 
-> cd source-code
-> make
+> bit build --release
