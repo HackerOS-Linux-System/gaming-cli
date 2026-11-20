@@ -1,0 +1,99 @@
+get <std:string> import <str_trim>
+get <work:common::sys> import <pid_alive::parse_int_or::timestamp>
+
+fun pid_file() -> Str [ end "/var/lib/hackeros-gaming/gamescope-manager.pid" ]
+fun log_file() -> Str [ end "/var/log/hackeros-gaming/gamescope-manager.log" ]
+fun crash_file() -> Str [ end "/var/lib/hackeros-gaming/crash-tracker" ]
+fun stop_marker() -> Str [ end "/var/lib/hackeros-gaming/stop-requested" ]
+
+!! Dopisuje linie "[czas] wiadomosc" do logu (cicho ignoruje bledy zapisu).
+fun log_entry(msg: Str) [
+    let line: Str = "[" + timestamp() + "] " + msg + "\n"
+    let path = log_file()
+    native {Rust} [
+        use std::io::Write;
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(&path) {
+            let _ = f.write_all(line.as_bytes());
+        }
+    ]
+]
+
+fun read_pid() -> Str [
+    match read_file(pid_file()) [
+        Ok(t) -> [
+            end str_trim(t)
+        ]
+        Err(_e) -> [
+            end ""
+        ]
+    ]
+]
+
+fun get_pid_int() -> Int [
+    end parse_int_or(read_pid(), -1)
+]
+
+fun write_pid(pid: Int) -> Result<Bool, Str> [
+    create_dir("/var/lib/hackeros-gaming")?
+    write_file(pid_file(), (pid as Str) + "\n")?
+    end ok(true)
+]
+
+fun remove_pid() [
+    let _r = remove_file(pid_file())
+]
+
+!! Czy sesja zyje; nieaktualny plik PID jest usuwany.
+fun is_running() -> Bool [
+    let pid = get_pid_int()
+    if pid <= 0 [
+        end false
+    ]
+    if pid_alive(pid) [
+        end true
+    ]
+    remove_pid()
+    end false
+]
+
+!! ---- licznik crashy ------------------------------------------------------------
+
+fun read_crash_count() -> Int [
+    match read_file(crash_file()) [
+        Ok(t) -> [
+            end parse_int_or(t, 0)
+        ]
+        Err(_e) -> [
+            end 0
+        ]
+    ]
+]
+
+fun track_crash() [
+    let count = read_crash_count() + 1
+    let _w = write_file(crash_file(), (count as Str))
+    log_entry("CRASH #" + (count as Str) + " (krotka sesja)")
+]
+
+fun reset_crash_tracker() [
+    let _r = remove_file(crash_file())
+]
+
+!! ---- zadanie zatrzymania (gamescope-manager stop) -----------------------------
+!! `stop` zabija gamescope, a petla recovery nie moze wtedy uznac tego za crash i
+!! wystartowac sesji od nowa - stad znacznik.
+
+fun mark_stop_requested() [
+    let _w = write_file(stop_marker(), "1\n")
+]
+
+fun clear_stop_requested() [
+    let _r = remove_file(stop_marker())
+]
+
+fun stop_requested() -> Bool [
+    end path_exists(stop_marker())
+]
